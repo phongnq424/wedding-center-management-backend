@@ -1,4 +1,4 @@
-package com.wedding.managemen.wedding_center_backend;
+package com.wedding.management.wedding_center_backend;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
