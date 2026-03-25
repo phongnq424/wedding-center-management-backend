@@ -2,10 +2,11 @@ package com.wedding.management.domain.hall.dto;
 
 import lombok.Builder;
 import lombok.Data;
+import java.util.UUID;
 
 @Data @Builder
 public class HallResponse {
-    private Long id;
+    private UUID id;
     private String name;
     private Integer capacity;
     private Double basePrice;

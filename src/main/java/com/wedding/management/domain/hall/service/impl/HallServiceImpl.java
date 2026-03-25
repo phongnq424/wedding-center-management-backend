@@ -12,8 +12,11 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.data.jpa.domain.Specification;
+import com.wedding.management.domain.hall.repository.HallSpecifications;
 
 import java.util.List;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -26,7 +29,6 @@ public class HallServiceImpl implements HallService {
     @Override
     @Transactional
     public HallResponse createHall(HallRequest request) {
-        // Kiểm tra tên trùng (Req 8)
         if (hallRepository.existsByNameAndIsDeletedFalse(request.getName())) {
             throw new BadRequestException("Tên sảnh '" + request.getName() + "' đã tồn tại!");
         }
@@ -45,11 +47,9 @@ public class HallServiceImpl implements HallService {
 
     @Override
     @Transactional
-    public HallResponse updateHall(Long id, HallRequest request) {
+    public HallResponse updateHall(UUID id, HallRequest request) {
         Hall hall = hallRepository.findByIdAndIsDeletedFalse(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy sảnh với ID: " + id));
-
-        // Req 9: Chặn cập nhật nếu sảnh đang được sử dụng hôm nay
         if (isHallInUseToday(id)) {
             throw new BadRequestException("Sảnh đang trong ca tiệc hôm nay, không thể chỉnh sửa!");
         }
@@ -64,10 +64,18 @@ public class HallServiceImpl implements HallService {
 
     @Override
     public List<HallResponse> searchHalls(String name, Integer capacity, String status) {
-        // Chuyển đổi String status sang Enum nếu có
-        HallStatus hallStatus = (status != null) ? HallStatus.valueOf(status.toUpperCase()) : null;
+        HallStatus hallStatus = null;
+        if (status != null && !status.isEmpty()) {
+            try {
+                hallStatus = HallStatus.valueOf(status.toUpperCase());
+            } catch (IllegalArgumentException e) {
+                log.error("Invalid status provided: {}", status);
+            }
+        }
 
-        return hallRepository.searchHalls(name, capacity, hallStatus)
+        Specification<Hall> spec = HallSpecifications.filterHalls(name, capacity, hallStatus);
+
+        return hallRepository.findAll(spec)
                 .stream()
                 .map(this::mapToResponse)
                 .collect(Collectors.toList());
@@ -75,7 +83,7 @@ public class HallServiceImpl implements HallService {
 
     @Override
     @Transactional
-    public void deleteHall(Long id) {
+    public void deleteHall(UUID id) {
         Hall hall = hallRepository.findByIdAndIsDeletedFalse(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy sảnh để xóa!"));
 
@@ -91,7 +99,7 @@ public class HallServiceImpl implements HallService {
 
     @Override
     @Transactional
-    public HallResponse activateHall(Long id) {
+    public HallResponse activateHall(UUID id) {
         Hall hall = hallRepository.findByIdAndIsDeletedFalse(id).orElseThrow();
         hall.setStatus(HallStatus.ACTIVE);
         return mapToResponse(hallRepository.save(hall));
@@ -110,12 +118,12 @@ public class HallServiceImpl implements HallService {
                 .build();
     }
 
-    private boolean isHallInUseToday(Long hallId) {
+    private boolean isHallInUseToday(UUID hallId) {
         // Logic này sẽ code khi làm module Booking
         return false;
     }
 
-    private boolean hasFutureBookings(Long hallId) {
+    private boolean hasFutureBookings(UUID hallId) {
         // Logic này sẽ code khi làm module Booking
         return false;
     }

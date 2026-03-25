@@ -9,6 +9,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/v1/halls")
@@ -20,6 +21,7 @@ public class HallController {
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public ApiResponse<HallResponse> createHall(@Valid @RequestBody HallRequest request) {
+        System.out.println(">>> HIT CREATE HALL");
         return ApiResponse.<HallResponse>builder()
                 .status(201)
                 .message("Tạo sảnh mới thành công")
@@ -29,7 +31,7 @@ public class HallController {
 
     @PutMapping("/{id}")
     public ApiResponse<HallResponse> updateHall(
-            @PathVariable Long id,
+            @PathVariable UUID id,
             @Valid @RequestBody HallRequest request) {
         return ApiResponse.<HallResponse>builder()
                 .status(200)
@@ -51,7 +53,7 @@ public class HallController {
     }
 
     @DeleteMapping("/{id}")
-    public ApiResponse<Void> delete(@PathVariable Long id) {
+    public ApiResponse<Void> delete(@PathVariable UUID id) {
         hallService.deleteHall(id);
         return ApiResponse.<Void>builder()
                 .status(200)
@@ -60,7 +62,7 @@ public class HallController {
     }
 
     @PatchMapping("/{id}/activate")
-    public ApiResponse<HallResponse> activateHall(@PathVariable Long id) {
+    public ApiResponse<HallResponse> activateHall(@PathVariable UUID id) {
         return ApiResponse.<HallResponse>builder()
                 .status(200)
                 .message("Sảnh đã được kích hoạt cho phép đặt tiệc")
