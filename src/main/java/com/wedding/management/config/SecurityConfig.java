@@ -17,7 +17,11 @@ public class SecurityConfig {
         http
                 .csrf(AbstractHttpConfigurer::disable)
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/api/v1/halls/**").permitAll() // Cho phép truy cập sảnh tiệc không cần login (để test)
+                        // Cho phép truy cập công khai để test các API Hall và Shift
+                        .requestMatchers("/api/v1/halls/**").permitAll()
+                        .requestMatchers("/api/v1/shifts/**").permitAll()
+                        .requestMatchers("/api/v1/services/**").permitAll()
+
                         .anyRequest().authenticated()
                 );
         return http.build();

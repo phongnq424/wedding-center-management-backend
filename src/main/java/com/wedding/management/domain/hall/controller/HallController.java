@@ -47,7 +47,7 @@ public class HallController {
             @RequestParam(required = false) String status) {
         return ApiResponse.<List<HallResponse>>builder()
                 .status(200)
-                .message("Tìm thấy " + name + " sảnh phù hợp") // Có thể tinh chỉnh câu thông báo
+                .message("Tìm thấy các sảnh phù hợp")
                 .data(hallService.searchHalls(name, capacity, status))
                 .build();
     }
