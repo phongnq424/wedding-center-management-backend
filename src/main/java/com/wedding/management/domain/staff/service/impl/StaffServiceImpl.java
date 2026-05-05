@@ -2,8 +2,8 @@ package com.wedding.management.domain.staff.service.impl;
 
 import com.wedding.management.common.exception.BadRequestException;
 import com.wedding.management.common.exception.ResourceNotFoundException;
-import com.wedding.management.domain.iam.model.Role;
-import com.wedding.management.domain.iam.repository.RoleRepository;
+import com.wedding.management.domain.rbac.model.Role;
+import com.wedding.management.domain.rbac.repository.RoleRepository;
 import com.wedding.management.domain.staff.dto.StaffRequest;
 import com.wedding.management.domain.staff.dto.StaffResponse;
 import com.wedding.management.domain.staff.enums.StaffStatus;
@@ -105,7 +105,7 @@ public class StaffServiceImpl implements StaffService {
         staff.setIsDeleted(true); // Soft delete (Req 4)
 
         // Logic Invalidate Session sẽ xử lý ở Security Context sau này
-        log.warn("Nhân viên {} đã bị vô hiệu hóa và xóa mềm", staff.getEmail());
+        log.warn("Nhân viên {} đã bị vô hiệu hóa", staff.getEmail());
         staffRepository.save(staff);
     }
 

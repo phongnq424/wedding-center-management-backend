@@ -1,6 +1,6 @@
 package com.wedding.management.domain.staff.repository;
 
-import com.wedding.management.domain.iam.model.Role;
+import com.wedding.management.domain.rbac.model.Role;
 import com.wedding.management.domain.staff.enums.StaffStatus;
 import com.wedding.management.domain.staff.model.Staff;
 import jakarta.persistence.criteria.Predicate;

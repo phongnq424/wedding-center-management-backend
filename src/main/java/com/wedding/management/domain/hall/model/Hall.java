@@ -6,6 +6,7 @@ import jakarta.persistence.*;
 import lombok.*;
 import lombok.experimental.Accessors;
 import lombok.experimental.SuperBuilder;
+import java.util.List;
 
 @Entity
 @Table(name = "halls")
@@ -14,12 +15,23 @@ public class Hall extends BaseEntity {
     @Column(unique = true, nullable = false)
     private String name;
 
-    private Integer capacity;
+    @ManyToOne(fetch = FetchType.EAGER, optional = false)
+    @JoinColumn(name = "hall_type_id", nullable = false)
+    private HallType hallType;
 
-    private Double basePrice;
+    @Column(nullable = false)
+    private Integer minTables;
+
+    @Column(nullable = false)
+    private Integer maxTables;
+
+    private String hallImage;
 
     @Column(columnDefinition = "TEXT")
     private String description;
+
+    @OneToMany(mappedBy = "hall", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
+    private List<HallPricing> pricings;
 
     @Enumerated(EnumType.STRING)
     @Builder.Default

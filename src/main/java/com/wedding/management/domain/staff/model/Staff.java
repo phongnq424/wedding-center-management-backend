@@ -2,7 +2,7 @@ package com.wedding.management.domain.staff.model;
 
 import com.wedding.management.common.entity.BaseEntity;
 import com.wedding.management.domain.staff.enums.StaffStatus;
-import com.wedding.management.domain.iam.model.Role;
+import com.wedding.management.domain.rbac.model.Role;
 import jakarta.persistence.*;
 import lombok.*;
 import lombok.experimental.Accessors;
