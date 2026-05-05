@@ -25,6 +25,11 @@ public interface RoleRepository extends JpaRepository<Role, UUID> {
     @Query("SELECT r FROM Role r WHERE LOWER(r.name) LIKE LOWER(CONCAT('%', :keyword, '%')) AND r.status = :status AND r.isDeleted = false ORDER BY r.updatedAt DESC")
     List<Role> searchByNameAndStatus(String keyword, RoleStatus status);
 
-    @Query("SELECT COUNT(s) FROM Staff s WHERE s.role.id = :roleId")
+    @Query("""
+       SELECT COUNT(s) FROM Staff s
+       WHERE s.roleId = :roleId
+       AND s.isDeleted = false
+       AND s.status = com.wedding.management.domain.staff.enums.StaffStatus.ACTIVE
+       """)
     long countActiveStaffByRole(UUID roleId);
 }

@@ -1,6 +1,9 @@
 package com.wedding.management.domain.service.dto;
 
-import jakarta.validation.constraints.*;
+import com.wedding.management.domain.service.enums.ServiceStatus;
+import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import lombok.Data;
 
 @Data
@@ -9,8 +12,10 @@ public class ServiceRequest {
     private String name;
 
     @NotNull(message = "Giá dịch vụ không được để trống")
-    @Positive(message = "Giá dịch vụ phải lớn hơn 0")
+    @DecimalMin(value = "0.0", inclusive = false, message = "Giá dịch vụ phải lớn hơn 0")
     private Double price;
 
+    private String serviceImage;
     private String description;
+    private ServiceStatus status;
 }

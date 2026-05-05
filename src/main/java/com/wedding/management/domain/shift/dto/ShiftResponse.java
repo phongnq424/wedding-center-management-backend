@@ -1,7 +1,9 @@
 package com.wedding.management.domain.shift.dto;
 
+import com.wedding.management.domain.shift.enums.ShiftStatus;
 import lombok.Builder;
 import lombok.Data;
+import java.time.Instant;
 import java.time.LocalTime;
 import java.util.UUID;
 
@@ -11,6 +13,7 @@ public class ShiftResponse {
     private String name;
     private LocalTime startTime;
     private LocalTime endTime;
-    private String status;
-    private String description;
+    private ShiftStatus status;
+    private Instant lastModifiedAt;
+    private String lastModifiedBy;
 }
