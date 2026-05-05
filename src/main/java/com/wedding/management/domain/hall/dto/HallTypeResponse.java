@@ -6,7 +6,8 @@ import lombok.Data;
 import java.time.Instant;
 import java.util.UUID;
 
-@Data @Builder
+@Data
+@Builder
 public class HallTypeResponse {
     private UUID id;
     private String name;

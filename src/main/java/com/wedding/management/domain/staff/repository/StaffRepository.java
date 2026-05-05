@@ -14,9 +14,9 @@ public interface StaffRepository extends JpaRepository<Staff, UUID> {
 
     Optional<Staff> findByIdAndIsDeletedFalse(UUID id);
 
-    Optional<Staff> findByEmail(String email);
 
-    Optional<Staff> findByPhoneNumber(String phoneNumber);
+    Optional<Staff> findByEmailAndIsDeletedFalse(String email);
+
 
     boolean existsByEmailAndIsDeletedFalse(String email);
 

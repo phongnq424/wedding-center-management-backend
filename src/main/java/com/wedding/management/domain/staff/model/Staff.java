@@ -1,6 +1,7 @@
 package com.wedding.management.domain.staff.model;
 
 import com.wedding.management.common.entity.BaseEntity;
+import com.wedding.management.domain.staff.enums.StaffAccountStatus;
 import com.wedding.management.domain.staff.enums.StaffStatus;
 import jakarta.persistence.*;
 import lombok.*;
@@ -21,7 +22,8 @@ import java.util.UUID;
                 @Index(name = "idx_staff_email", columnList = "email"),
                 @Index(name = "idx_staff_phone", columnList = "phone_number"),
                 @Index(name = "idx_staff_role_id", columnList = "role_id"),
-                @Index(name = "idx_staff_status", columnList = "status")
+                @Index(name = "idx_staff_status", columnList = "status"),
+                @Index(name = "idx_staff_account_status", columnList = "account_status")
         }
 )
 @Getter
@@ -56,6 +58,21 @@ public class Staff extends BaseEntity {
     @Enumerated(EnumType.STRING)
     @Builder.Default
     private StaffStatus status = StaffStatus.INACTIVE;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "account_status", nullable = false)
+    @Builder.Default
+    private StaffAccountStatus accountStatus = StaffAccountStatus.INACTIVE;
+
+    @Column(name = "password_hash")
+    private String passwordHash;
+
+    @Column(name = "failed_attempts", nullable = false)
+    @Builder.Default
+    private Integer failedAttempts = 0;
+
+    @Column(name = "last_login_at")
+    private Instant lastLoginAt;
 
     @Column(name = "activation_token")
     private String activationToken;

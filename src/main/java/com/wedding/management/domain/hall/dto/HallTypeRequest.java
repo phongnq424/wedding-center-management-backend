@@ -3,6 +3,7 @@ package com.wedding.management.domain.hall.dto;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.DecimalMin;
 import lombok.Data;
+import org.springframework.web.multipart.MultipartFile;
 
 @Data
 public class HallTypeRequest {

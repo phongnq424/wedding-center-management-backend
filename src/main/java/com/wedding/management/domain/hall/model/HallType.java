@@ -9,7 +9,12 @@ import lombok.experimental.SuperBuilder;
 
 @Entity
 @Table(name = "hall_types")
-@Getter @Setter @NoArgsConstructor @AllArgsConstructor @SuperBuilder @Accessors(chain = true)
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@SuperBuilder
+@Accessors(chain = true)
 public class HallType extends BaseEntity {
     @Column(unique = true, nullable = false)
     private String name;
@@ -18,6 +23,8 @@ public class HallType extends BaseEntity {
 
     @Column(nullable = false)
     private Double basePrice;
+
+    private String imageUrl;
 
     @Enumerated(EnumType.STRING)
     @Builder.Default

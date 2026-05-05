@@ -4,12 +4,11 @@ import com.wedding.management.common.audit.AuditLog;
 import com.wedding.management.common.audit.AuditLogRepository;
 import com.wedding.management.common.exception.BadRequestException;
 import com.wedding.management.common.exception.ResourceNotFoundException;
+import com.wedding.management.config.supabase.SupabaseFileUploadService;
 import com.wedding.management.domain.hall.dto.HallPricingDTO;
 import com.wedding.management.domain.hall.dto.HallRequest;
 import com.wedding.management.domain.hall.dto.HallResponse;
 import com.wedding.management.domain.hall.enums.HallStatus;
-import com.wedding.management.domain.hall.enums.DayType;
-import com.wedding.management.domain.hall.enums.TimeSlot;
 import com.wedding.management.domain.hall.model.Hall;
 import com.wedding.management.domain.hall.model.HallPricing;
 import com.wedding.management.domain.hall.model.HallType;
@@ -17,28 +16,41 @@ import com.wedding.management.domain.hall.repository.HallPricingRepository;
 import com.wedding.management.domain.hall.repository.HallRepository;
 import com.wedding.management.domain.hall.repository.HallTypeRepository;
 import com.wedding.management.domain.hall.service.HallService;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import java.io.IOException;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
-import java.util.*;
+import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 @Service
 @Transactional
+@Slf4j
 public class HallServiceImpl implements HallService {
 
     private final HallRepository hallRepository;
     private final HallTypeRepository hallTypeRepository;
     private final HallPricingRepository hallPricingRepository;
     private final AuditLogRepository auditLogRepository;
+    private final SupabaseFileUploadService fileUploadService;
 
-    public HallServiceImpl(HallRepository hallRepository, HallTypeRepository hallTypeRepository,
-                         HallPricingRepository hallPricingRepository, AuditLogRepository auditLogRepository) {
+    public HallServiceImpl(
+            HallRepository hallRepository,
+            HallTypeRepository hallTypeRepository,
+            HallPricingRepository hallPricingRepository,
+            AuditLogRepository auditLogRepository,
+            SupabaseFileUploadService fileUploadService
+    ) {
         this.hallRepository = hallRepository;
         this.hallTypeRepository = hallTypeRepository;
         this.hallPricingRepository = hallPricingRepository;
         this.auditLogRepository = auditLogRepository;
+        this.fileUploadService = fileUploadService;
     }
 
     @Override
@@ -65,7 +77,7 @@ public class HallServiceImpl implements HallService {
             throw new BadRequestException("MSG59: Số bàn tối đa phải lớn hơn số bàn tối thiểu");
         }
 
-        if (request.getHallImage() == null || request.getHallImage().isBlank()) {
+        if (request.getHallImage() == null || request.getHallImage().isEmpty()) {
             throw new BadRequestException("MSG2: Hình ảnh sảnh không được để trống");
         }
 
@@ -81,13 +93,25 @@ public class HallServiceImpl implements HallService {
             throw new BadRequestException("MSG49: Tên sảnh đã tồn tại");
         }
 
+        // Handle image upload
+        String hallImageUrl = null;
+        if (request.getHallImage() != null && !request.getHallImage().isEmpty()) {
+            try {
+                hallImageUrl = fileUploadService.uploadPublicFile(request.getHallImage(), "halls");
+                log.info("Hall image uploaded: {}", hallImageUrl);
+            } catch (IOException e) {
+                log.error("Error uploading hall image: {}", e.getMessage(), e);
+                throw new BadRequestException("Lỗi upload hình ảnh: " + e.getMessage());
+            }
+        }
+
         // BR-CH-4: Create hall
         Hall hall = Hall.builder()
                 .name(request.getName())
                 .hallType(hallType)
                 .minTables(request.getMinTables())
                 .maxTables(request.getMaxTables())
-                .hallImage(request.getHallImage())
+                .hallImage(hallImageUrl)
                 .description(request.getDescription())
                 .status(HallStatus.INACTIVE)
                 .createdBy(currentUserId)
@@ -120,6 +144,10 @@ public class HallServiceImpl implements HallService {
             throw new BadRequestException("MSG2: Tên sảnh không được để trống");
         }
 
+        if (request.getHallTypeId() == null) {
+            throw new BadRequestException("MSG2: Loại sảnh không được để trống");
+        }
+
         if (request.getMinTables() == null || request.getMinTables() <= 0) {
             throw new BadRequestException("MSG2: Số bàn tối thiểu phải lớn hơn 0");
         }
@@ -147,18 +175,44 @@ public class HallServiceImpl implements HallService {
         if (hallInUse.isPresent()) {
             // Can only update: description, priceMatrix, hallImage
             // Cannot update: minTables, maxTables, hallTypeId
-            // For simplicity, we allow all updates but would need to check this in production
+            // For simplicity, we block the update to match current project rule.
             throw new BadRequestException("MSG35: Không thể cập nhật sảnh đang được sử dụng hôm nay");
         }
 
-        // BR-UH-4: Check uniqueness (excluding current record)
-        if (!hall.getName().equals(request.getName()) && hallRepository.existsByNameAndIsDeletedFalse(request.getName())) {
+        // BR-UH-4: Check uniqueness excluding current record
+        if (!hall.getName().equals(request.getName())
+                && hallRepository.existsByNameAndIsDeletedFalse(request.getName())) {
             throw new BadRequestException("MSG49: Tên sảnh đã tồn tại");
         }
 
         // BR-UH-4: Optimistic locking
-        if (hall.getUpdatedAt().toEpochMilli() != lastModifiedAt) {
+        if (hall.getUpdatedAt() != null && hall.getUpdatedAt().toEpochMilli() != lastModifiedAt) {
             throw new BadRequestException("MSG62: Dữ liệu đã được sửa đổi bởi người khác. Vui lòng tải lại trang.");
+        }
+
+        // Handle image upload and replacement
+        String hallImageUrl = hall.getHallImage();
+
+        if (request.getHallImage() != null && !request.getHallImage().isEmpty()) {
+            try {
+                // Delete old image if exists
+                if (hall.getHallImage() != null && !hall.getHallImage().isEmpty()) {
+                    try {
+                        String oldPath = extractFilePath(hall.getHallImage());
+                        fileUploadService.deleteFile("public-assets", oldPath);
+                        log.info("Old hall image deleted: {}", oldPath);
+                    } catch (Exception e) {
+                        log.warn("Failed to delete old hall image: {}", e.getMessage());
+                    }
+                }
+
+                // Upload new image
+                hallImageUrl = fileUploadService.uploadPublicFile(request.getHallImage(), "halls");
+                log.info("Hall image updated: {}", hallImageUrl);
+            } catch (IOException e) {
+                log.error("Error uploading hall image: {}", e.getMessage(), e);
+                throw new BadRequestException("Lỗi upload hình ảnh: " + e.getMessage());
+            }
         }
 
         // BR-UH-5: Update hall
@@ -166,7 +220,7 @@ public class HallServiceImpl implements HallService {
         hall.setHallType(hallType);
         hall.setMinTables(request.getMinTables());
         hall.setMaxTables(request.getMaxTables());
-        hall.setHallImage(request.getHallImage());
+        hall.setHallImage(hallImageUrl);
         hall.setDescription(request.getDescription());
         hall.setUpdatedBy(currentUserId);
         hall.setUpdatedAt(Instant.now());
@@ -183,7 +237,14 @@ public class HallServiceImpl implements HallService {
     }
 
     @Override
-    public List<HallResponse> searchHalls(String hallName, UUID hallTypeId, Integer minTablesFrom, Integer maxTablesTo, HallStatus status) {
+    @Transactional(readOnly = true)
+    public List<HallResponse> searchHalls(
+            String hallName,
+            UUID hallTypeId,
+            Integer minTablesFrom,
+            Integer maxTablesTo,
+            HallStatus status
+    ) {
         List<Hall> halls = hallRepository.findAllActive();
 
         // Apply filters
@@ -240,7 +301,8 @@ public class HallServiceImpl implements HallService {
             saveAuditLog(currentUserId, "DELETE_HALL", hallId, hall.getName());
         } else {
             // Case 2: Hall has future bookings - offer deactivation
-            // MSG64: "This hall is currently assigned to future booking. You cannot delete it. Do you want to deactivate this hall instead?"
+            // MSG64: "This hall is currently assigned to future booking. You cannot delete it.
+            // Do you want to deactivate this hall instead?"
             hall.setStatus(HallStatus.INACTIVE);
             hall.setUpdatedBy(currentUserId);
             hall.setUpdatedAt(Instant.now());
@@ -296,17 +358,18 @@ public class HallServiceImpl implements HallService {
                         .createdBy(hall.getCreatedBy())
                         .createdAt(Instant.now())
                         .build();
+
                 hallPricingRepository.save(pricing);
             }
         }
     }
 
     private void updatePricingMatrix(Hall hall, List<HallPricingDTO> pricings) {
-        // Clear existing pricings
         List<HallPricing> existingPricings = hallPricingRepository.findByHallId(hall.getId());
-        hallPricingRepository.deleteAll(existingPricings);
 
-        // Save new pricings
+        hallPricingRepository.deleteAll(existingPricings);
+        hallPricingRepository.flush();
+
         if (pricings != null) {
             for (HallPricingDTO pricingDTO : pricings) {
                 HallPricing pricing = HallPricing.builder()
@@ -314,12 +377,32 @@ public class HallServiceImpl implements HallService {
                         .timeSlot(pricingDTO.getTimeSlot())
                         .dayType(pricingDTO.getDayType())
                         .price(pricingDTO.getPrice())
+                        .createdBy(hall.getCreatedBy())
+                        .createdAt(Instant.now())
                         .updatedBy(hall.getUpdatedBy())
                         .updatedAt(Instant.now())
+                        .isDeleted(false)
                         .build();
+
                 hallPricingRepository.save(pricing);
             }
         }
+    }
+
+    private String extractFilePath(String imageUrl) {
+        // Extract path from URL:
+        // https://xxxxx.supabase.co/storage/v1/object/public/public-assets/halls/filename.jpg
+        // Returns: halls/filename.jpg
+        if (imageUrl == null) {
+            return null;
+        }
+
+        String[] parts = imageUrl.split("public-assets/");
+        if (parts.length > 1) {
+            return parts[1];
+        }
+
+        return imageUrl;
     }
 
     private HallResponse mapToHallResponse(Hall hall) {
@@ -352,6 +435,7 @@ public class HallServiceImpl implements HallService {
     private void saveAuditLog(String userId, String action, UUID targetId, String targetName) {
         try {
             UUID userUUID = UUID.fromString(userId);
+
             AuditLog auditLog = AuditLog.builder()
                     .userId(userUUID)
                     .action(action)
@@ -359,9 +443,10 @@ public class HallServiceImpl implements HallService {
                     .targetName(targetName)
                     .createdAt(Instant.now())
                     .build();
+
             auditLogRepository.save(auditLog);
         } catch (IllegalArgumentException e) {
-            // If userId is not a valid UUID, skip audit logging
+            // If userId is not a valid UUID, skip audit logging to match current project style.
         }
     }
 }

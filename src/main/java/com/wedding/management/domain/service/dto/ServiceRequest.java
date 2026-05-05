@@ -5,6 +5,7 @@ import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import lombok.Data;
+import org.springframework.web.multipart.MultipartFile;
 
 @Data
 public class ServiceRequest {
@@ -15,7 +16,7 @@ public class ServiceRequest {
     @DecimalMin(value = "0.0", inclusive = false, message = "Giá dịch vụ phải lớn hơn 0")
     private Double price;
 
-    private String serviceImage;
+    private MultipartFile serviceImage;
     private String description;
     private ServiceStatus status;
 }

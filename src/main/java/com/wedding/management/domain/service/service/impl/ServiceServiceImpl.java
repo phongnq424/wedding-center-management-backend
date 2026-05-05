@@ -4,13 +4,16 @@ import com.wedding.management.common.audit.AuditLog;
 import com.wedding.management.common.audit.AuditLogRepository;
 import com.wedding.management.common.exception.BadRequestException;
 import com.wedding.management.common.exception.ResourceNotFoundException;
+import com.wedding.management.config.supabase.SupabaseFileUploadService;
 import com.wedding.management.domain.service.dto.ServiceRequest;
 import com.wedding.management.domain.service.dto.ServiceResponse;
 import com.wedding.management.domain.service.enums.ServiceStatus;
 import com.wedding.management.domain.service.model.Service;
 import com.wedding.management.domain.service.repository.ServiceRepository;
 import com.wedding.management.domain.service.service.ServiceService;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.transaction.annotation.Transactional;
+import java.io.IOException;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -18,14 +21,18 @@ import java.util.stream.Collectors;
 
 @org.springframework.stereotype.Service
 @Transactional
+@Slf4j
 public class ServiceServiceImpl implements ServiceService {
 
     private final ServiceRepository serviceRepository;
     private final AuditLogRepository auditLogRepository;
+    private final SupabaseFileUploadService fileUploadService;
 
-    public ServiceServiceImpl(ServiceRepository serviceRepository, AuditLogRepository auditLogRepository) {
+    public ServiceServiceImpl(ServiceRepository serviceRepository, AuditLogRepository auditLogRepository,
+            SupabaseFileUploadService fileUploadService) {
         this.serviceRepository = serviceRepository;
         this.auditLogRepository = auditLogRepository;
+        this.fileUploadService = fileUploadService;
     }
 
     @Override
@@ -38,11 +45,23 @@ public class ServiceServiceImpl implements ServiceService {
             throw new BadRequestException("MSG49: Tên dịch vụ đã tồn tại");
         }
 
+        // Handle image upload
+        String serviceImageUrl = null;
+        if (request.getServiceImage() != null && !request.getServiceImage().isEmpty()) {
+            try {
+                serviceImageUrl = fileUploadService.uploadPublicFile(request.getServiceImage(), "services");
+                log.info("Service image uploaded: {}", serviceImageUrl);
+            } catch (IOException e) {
+                log.error("Error uploading service image: {}", e.getMessage(), e);
+                throw new BadRequestException("Lỗi upload hình ảnh: " + e.getMessage());
+            }
+        }
+
         // BR-CSF-4: Create service
         Service service = Service.builder()
                 .name(request.getName())
                 .price(request.getPrice())
-                .serviceImage(request.getServiceImage())
+                .serviceImage(serviceImageUrl)
                 .description(request.getDescription())
                 .status(ServiceStatus.ACTIVE)
                 .createdBy(currentUserId)
@@ -59,7 +78,8 @@ public class ServiceServiceImpl implements ServiceService {
     }
 
     @Override
-    public ServiceResponse updateService(UUID serviceId, ServiceRequest request, String currentUserId, long lastModifiedAt) {
+    public ServiceResponse updateService(UUID serviceId, ServiceRequest request, String currentUserId,
+            long lastModifiedAt) {
         Service service = serviceRepository.findById(serviceId)
                 .orElseThrow(() -> new ResourceNotFoundException("Dịch vụ không tồn tại"));
 
@@ -71,7 +91,8 @@ public class ServiceServiceImpl implements ServiceService {
         validateServiceInput(request);
 
         // BR-USV-3: Check uniqueness excluding current record
-        if (!service.getName().equals(request.getName()) && serviceRepository.existsByNameAndIsDeletedFalse(request.getName())) {
+        if (!service.getName().equals(request.getName())
+                && serviceRepository.existsByNameAndIsDeletedFalse(request.getName())) {
             throw new BadRequestException("MSG49: Tên dịch vụ đã tồn tại");
         }
 
@@ -80,10 +101,34 @@ public class ServiceServiceImpl implements ServiceService {
             throw new BadRequestException("MSG62: Dữ liệu đã được sửa đổi bởi người khác. Vui lòng tải lại trang.");
         }
 
+        // Handle image upload and replacement
+        String serviceImageUrl = service.getServiceImage();
+        if (request.getServiceImage() != null && !request.getServiceImage().isEmpty()) {
+            try {
+                // Delete old image if exists
+                if (service.getServiceImage() != null && !service.getServiceImage().isEmpty()) {
+                    try {
+                        String oldPath = extractFilePath(service.getServiceImage());
+                        fileUploadService.deleteFile("public-assets", oldPath);
+                        log.info("Old service image deleted: {}", oldPath);
+                    } catch (Exception e) {
+                        log.warn("Failed to delete old image: {}", e.getMessage());
+                    }
+                }
+
+                // Upload new image
+                serviceImageUrl = fileUploadService.uploadPublicFile(request.getServiceImage(), "services");
+                log.info("Service image updated: {}", serviceImageUrl);
+            } catch (IOException e) {
+                log.error("Error uploading service image: {}", e.getMessage(), e);
+                throw new BadRequestException("Lỗi upload hình ảnh: " + e.getMessage());
+            }
+        }
+
         // BR-USV-4: Update service
         service.setName(request.getName());
         service.setPrice(request.getPrice());
-        service.setServiceImage(request.getServiceImage());
+        service.setServiceImage(serviceImageUrl);
         service.setDescription(request.getDescription());
         service.setStatus(request.getStatus() != null ? request.getStatus() : service.getStatus());
         service.setUpdatedBy(currentUserId);
@@ -149,9 +194,11 @@ public class ServiceServiceImpl implements ServiceService {
 
             saveAuditLog(currentUserId, "DELETE_SERVICE", serviceId, service.getName());
         } else {
-            // Case 2: Service is in wedding package - only deactivate if user confirms from UI
+            // Case 2: Service is in wedding package - only deactivate if user confirms from
+            // UI
             if (!deactivateIfInUse) {
-                throw new BadRequestException("This service is currently assigned to wedding package. You cannot delete it. Do you want to deactivate this service instead or check your package?");
+                throw new BadRequestException(
+                        "This service is currently assigned to wedding package. You cannot delete it. Do you want to deactivate this service instead or check your package?");
             }
 
             service.setStatus(ServiceStatus.INACTIVE);
@@ -206,6 +253,19 @@ public class ServiceServiceImpl implements ServiceService {
         }
     }
 
+    private String extractFilePath(String imageUrl) {
+        // Extract path from URL:
+        // https://xxxxx.supabase.co/storage/v1/object/public/public-assets/services/filename.jpg
+        // Returns: services/filename.jpg
+        if (imageUrl == null)
+            return null;
+        String[] parts = imageUrl.split("public-assets/");
+        if (parts.length > 1) {
+            return parts[1];
+        }
+        return imageUrl;
+    }
+
     private ServiceResponse mapToServiceResponse(Service service) {
         return ServiceResponse.builder()
                 .id(service.getId())
@@ -231,7 +291,8 @@ public class ServiceServiceImpl implements ServiceService {
                     .build();
             auditLogRepository.save(auditLog);
         } catch (IllegalArgumentException e) {
-            // If userId is not a valid UUID, skip audit logging to match current project style.
+            // If userId is not a valid UUID, skip audit logging to match current project
+            // style.
         }
     }
 }

@@ -2,6 +2,8 @@ package com.wedding.management.domain.hall.dto;
 
 import jakarta.validation.constraints.*;
 import lombok.Data;
+import org.springframework.web.multipart.MultipartFile;
+
 import java.util.List;
 import java.util.UUID;
 
@@ -21,7 +23,7 @@ public class HallRequest {
     @Min(value = 1, message = "Số bàn tối đa phải lớn hơn 0")
     private Integer maxTables;
 
-    private String hallImage;
+    private MultipartFile hallImage;
 
     private String description;
 
