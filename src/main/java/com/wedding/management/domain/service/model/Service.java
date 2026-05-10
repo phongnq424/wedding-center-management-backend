@@ -12,7 +12,7 @@ import java.time.Instant;
 @Table(name = "services")
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @SuperBuilder @Accessors(chain = true)
 public class Service extends BaseEntity {
-    @Column(unique = true, nullable = false)
+    @Column(nullable = false)
     private String name;
 
     @Column(nullable = false)
