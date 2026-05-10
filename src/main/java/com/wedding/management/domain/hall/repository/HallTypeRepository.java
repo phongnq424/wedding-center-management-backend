@@ -11,7 +11,7 @@ import java.util.UUID;
 
 @Repository
 public interface HallTypeRepository extends JpaRepository<HallType, UUID> {
-    Optional<HallType> findByName(String name);
+    Optional<HallType> findByNameAndIsDeletedFalse(String name);
 
     @Query("SELECT ht FROM HallType ht WHERE ht.isDeleted = false ORDER BY ht.updatedAt DESC")
     List<HallType> findAllActive();

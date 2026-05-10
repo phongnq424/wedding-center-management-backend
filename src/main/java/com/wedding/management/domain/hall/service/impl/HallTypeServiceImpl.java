@@ -46,7 +46,7 @@ public class HallTypeServiceImpl implements HallTypeService {
         }
 
         // BR-CHT-03: Check uniqueness
-        Optional<HallType> existingType = hallTypeRepository.findByName(request.getName());
+        Optional<HallType> existingType = hallTypeRepository.findByNameAndIsDeletedFalse(request.getName());
         if (existingType.isPresent() && !existingType.get().getIsDeleted()) {
             throw new BadRequestException("MSG49: Tên loại sảnh đã tồn tại");
         }
@@ -95,7 +95,7 @@ public class HallTypeServiceImpl implements HallTypeService {
 
         // BR-UPHT-3: Check uniqueness excluding current record
         if (!hallType.getName().equals(request.getName())) {
-            Optional<HallType> existingType = hallTypeRepository.findByName(request.getName());
+            Optional<HallType> existingType = hallTypeRepository.findByNameAndIsDeletedFalse(request.getName());
             if (existingType.isPresent() && !existingType.get().getIsDeleted()) {
                 throw new BadRequestException("MSG49: Tên loại sảnh đã tồn tại");
             }

@@ -12,7 +12,7 @@ import java.time.Instant;
 @Table(name = "dishes")
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @SuperBuilder @Accessors(chain = true)
 public class Dish extends BaseEntity {
-    @Column(unique = true, nullable = false)
+    @Column(nullable = false)
     private String name;
 
     @ManyToOne(fetch = FetchType.EAGER, optional = false)

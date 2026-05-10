@@ -12,7 +12,7 @@ import java.util.List;
 @Table(name = "halls")
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @SuperBuilder @Accessors(chain = true)
 public class Hall extends BaseEntity {
-    @Column(unique = true, nullable = false)
+    @Column(nullable = false)
     private String name;
 
     @ManyToOne(fetch = FetchType.EAGER, optional = false)

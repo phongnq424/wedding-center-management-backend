@@ -17,6 +17,7 @@ public interface HallRepository extends JpaRepository<Hall, UUID>, JpaSpecificat
     Optional<Hall> findByIdAndIsDeletedFalse(UUID id);
 
     boolean existsByNameAndIsDeletedFalse(String name);
+    boolean existsByNameAndIdNotAndIsDeletedFalse(String name, UUID id);
 
     @Query("SELECT h FROM Hall h WHERE h.isDeleted = false ORDER BY h.updatedAt DESC")
     List<Hall> findAllActive();
@@ -40,4 +41,5 @@ public interface HallRepository extends JpaRepository<Hall, UUID>, JpaSpecificat
 
     @Query("SELECT h FROM Hall h WHERE h.id = :hallId AND EXISTS (SELECT b FROM Booking b WHERE b.hall.id = h.id AND CAST(b.bookingDate AS date) = CAST(:today AS date))")
     Optional<Hall> findHallInUseToday(UUID hallId, Instant today);
+
 }

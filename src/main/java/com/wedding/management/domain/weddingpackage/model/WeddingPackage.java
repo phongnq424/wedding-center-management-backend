@@ -14,7 +14,7 @@ import java.util.List;
 @Table(name = "wedding_packages")
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @SuperBuilder @Accessors(chain = true)
 public class WeddingPackage extends BaseEntity {
-    @Column(unique = true, nullable = false)
+    @Column( nullable = false)
     private String name;
 
     @Column(columnDefinition = "TEXT")

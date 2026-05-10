@@ -12,7 +12,7 @@ import java.time.Instant;
 @Table(name = "beverage_types")
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @SuperBuilder @Accessors(chain = true)
 public class BeverageType extends BaseEntity {
-    @Column(unique = true, nullable = false)
+    @Column(nullable = false)
     private String name;
 
     @Column(columnDefinition = "TEXT")

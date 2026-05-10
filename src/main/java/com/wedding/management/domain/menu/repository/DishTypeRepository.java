@@ -8,7 +8,6 @@ import java.util.*;
 
 @Repository
 public interface DishTypeRepository extends JpaRepository<DishType, UUID> {
-    Optional<DishType> findByName(String name);
     Optional<DishType> findByIdAndIsDeletedFalse(UUID id);
     boolean existsByNameAndIsDeletedFalse(String name);
     boolean existsByNameAndIdNotAndIsDeletedFalse(String name, UUID id);

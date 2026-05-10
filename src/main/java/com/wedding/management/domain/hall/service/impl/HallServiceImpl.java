@@ -144,6 +144,7 @@ public class HallServiceImpl implements HallService {
             throw new BadRequestException("MSG2: Tên sảnh không được để trống");
         }
 
+
         if (request.getHallTypeId() == null) {
             throw new BadRequestException("MSG2: Loại sảnh không được để trống");
         }
@@ -164,6 +165,10 @@ public class HallServiceImpl implements HallService {
         HallType hallType = hallTypeRepository.findById(request.getHallTypeId())
                 .orElseThrow(() -> new ResourceNotFoundException("Loại sảnh không tồn tại"));
 
+        if (!hall.getName().equals(request.getName())
+                && hallRepository.existsByNameAndIsDeletedFalse(request.getName())) {
+            throw new BadRequestException("MSG49: Tên sảnh đã tồn tại");
+        }
         // Validate pricing matrix >= base price
         validatePricingMatrix(request.getPricings(), hallType.getBasePrice());
 
@@ -221,6 +226,7 @@ public class HallServiceImpl implements HallService {
         hall.setMinTables(request.getMinTables());
         hall.setMaxTables(request.getMaxTables());
         hall.setHallImage(hallImageUrl);
+        hall.setStatus(request.getStatus());
         hall.setDescription(request.getDescription());
         hall.setUpdatedBy(currentUserId);
         hall.setUpdatedAt(Instant.now());

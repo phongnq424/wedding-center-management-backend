@@ -1,5 +1,6 @@
 package com.wedding.management.domain.hall.dto;
 
+import com.wedding.management.domain.hall.enums.HallStatus;
 import jakarta.validation.constraints.*;
 import lombok.Data;
 import org.springframework.web.multipart.MultipartFile;
@@ -22,6 +23,7 @@ public class HallRequest {
     @NotNull(message = "Số bàn tối đa không được để trống")
     @Min(value = 1, message = "Số bàn tối đa phải lớn hơn 0")
     private Integer maxTables;
+    private HallStatus status;
 
     private MultipartFile hallImage;
 
