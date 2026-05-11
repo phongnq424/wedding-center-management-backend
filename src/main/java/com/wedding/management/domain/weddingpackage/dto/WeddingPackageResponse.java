@@ -25,6 +25,14 @@ public class WeddingPackageResponse {
     private Integer numberOfMenuCombos;
     private Integer numberOfIncludedServices;
     private Integer numberOfBeverageAllowances;
+    private Double estimatedOriginalMenuComboPrice;
+    private Double estimatedDiscountedMenuComboPrice;
+    private Double includedServiceTotal;
+    private Double beverageAllowanceTotal;
+    private Double originalPackageTotal;
+    private Double estimatedPackageTotal;
+    private Double estimatedSavingsAmount;
+    private Double estimatedSavingsRate;
     private WeddingPackageStatus status;
     private Instant lastModifiedAt;
     private String lastModifiedBy;

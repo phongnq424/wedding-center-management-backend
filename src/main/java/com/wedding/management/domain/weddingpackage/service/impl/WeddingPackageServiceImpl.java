@@ -10,12 +10,14 @@ import com.wedding.management.domain.hall.repository.HallTypeRepository;
 import com.wedding.management.domain.menu.enums.*;
 import com.wedding.management.domain.menu.model.*;
 import com.wedding.management.domain.menu.repository.*;
+import com.wedding.management.domain.service.enums.ServiceStatus;
 import com.wedding.management.domain.weddingpackage.dto.*;
 import com.wedding.management.domain.weddingpackage.enums.*;
 import com.wedding.management.domain.weddingpackage.model.*;
 import com.wedding.management.domain.weddingpackage.repository.*;
 import com.wedding.management.domain.weddingpackage.service.WeddingPackageService;
 import org.springframework.stereotype.Service;
+import com.wedding.management.domain.service.repository.ServiceRepository;
 import org.springframework.transaction.annotation.Transactional;
 import java.time.Instant;
 import java.util.*;
@@ -34,6 +36,7 @@ public class WeddingPackageServiceImpl implements WeddingPackageService {
     private final BeverageRepository beverageRepository;
     private final HallTypeRepository hallTypeRepository;
     private final AuditLogRepository auditLogRepository;
+    private final ServiceRepository serviceRepository;
 
     public WeddingPackageServiceImpl(WeddingPackageRepository weddingPackageRepository,
                                      WeddingPackageMenuComboRepository menuComboRepository,
@@ -44,6 +47,7 @@ public class WeddingPackageServiceImpl implements WeddingPackageService {
                                      DishComboRepository dishComboRepository,
                                      BeverageRepository beverageRepository,
                                      HallTypeRepository hallTypeRepository,
+                                     ServiceRepository serviceRepository,
                                      AuditLogRepository auditLogRepository) {
         this.weddingPackageRepository = weddingPackageRepository;
         this.menuComboRepository = menuComboRepository;
@@ -54,6 +58,7 @@ public class WeddingPackageServiceImpl implements WeddingPackageService {
         this.dishComboRepository = dishComboRepository;
         this.beverageRepository = beverageRepository;
         this.hallTypeRepository = hallTypeRepository;
+        this.serviceRepository = serviceRepository;
         this.auditLogRepository = auditLogRepository;
     }
 
@@ -313,10 +318,26 @@ public class WeddingPackageServiceImpl implements WeddingPackageService {
 
     private void validateServiceItems(List<WeddingPackageServiceItemDTO> serviceItems) {
         Set<UUID> serviceIds = new HashSet<>();
+
         for (WeddingPackageServiceItemDTO item : serviceItems) {
-            if (item.getServiceId() == null) throw new BadRequestException("MSG2: Dịch vụ không được để trống");
-            if (!serviceIds.add(item.getServiceId())) throw new BadRequestException("MSG49: Danh sách dịch vụ không được trùng lặp");
-            if (item.getQuantity() != null && item.getQuantity() <= 0) throw new BadRequestException("MSG13: Số lượng dịch vụ phải lớn hơn 0");
+            if (item.getServiceId() == null) {
+                throw new BadRequestException("MSG2: Dịch vụ không được để trống");
+            }
+
+            if (!serviceIds.add(item.getServiceId())) {
+                throw new BadRequestException("MSG49: Danh sách dịch vụ không được trùng lặp");
+            }
+
+            if (item.getQuantity() != null && item.getQuantity() <= 0) {
+                throw new BadRequestException("MSG13: Số lượng dịch vụ phải lớn hơn 0");
+            }
+
+            com.wedding.management.domain.service.model.Service service = serviceRepository.findByIdAndIsDeletedFalse(item.getServiceId())
+                    .orElseThrow(() -> new ResourceNotFoundException("Dịch vụ không tồn tại"));
+
+            if (service.getStatus() != ServiceStatus.ACTIVE) {
+                throw new BadRequestException("MSG2: Dịch vụ không còn hoạt động");
+            }
         }
     }
 
@@ -362,9 +383,26 @@ public class WeddingPackageServiceImpl implements WeddingPackageService {
         }
     }
 
-    private void savePackageServices(WeddingPackage weddingPackage, List<WeddingPackageServiceItemDTO> serviceItems, String currentUserId) {
+    private void savePackageServices(
+            WeddingPackage weddingPackage,
+            List<WeddingPackageServiceItemDTO> serviceItems,
+            String currentUserId
+    ) {
         for (WeddingPackageServiceItemDTO item : serviceItems) {
-            WeddingPackageServiceItem entity = WeddingPackageServiceItem.builder().weddingPackage(weddingPackage).serviceId(item.getServiceId()).serviceName(item.getServiceName()).quantity(item.getQuantity() == null ? 1 : item.getQuantity()).note(item.getNote()).createdBy(currentUserId).createdAt(Instant.now()).isDeleted(false).build();
+            com.wedding.management.domain.service.model.Service service = serviceRepository.findByIdAndIsDeletedFalse(item.getServiceId())
+                    .orElseThrow(() -> new ResourceNotFoundException("Dịch vụ không tồn tại"));
+
+            WeddingPackageServiceItem entity = WeddingPackageServiceItem.builder()
+                    .weddingPackage(weddingPackage)
+                    .serviceId(service.getId())
+                    .serviceName(service.getName())
+                    .quantity(item.getQuantity() == null ? 1 : item.getQuantity())
+                    .note(item.getNote())
+                    .createdBy(currentUserId)
+                    .createdAt(Instant.now())
+                    .isDeleted(false)
+                    .build();
+
             serviceItemRepository.save(entity);
         }
     }
@@ -432,6 +470,18 @@ public class WeddingPackageServiceImpl implements WeddingPackageService {
         List<UUID> comboIds = menuCombos.stream().map(m -> m.getDishCombo().getId()).collect(Collectors.toList());
         List<String> comboNames = menuCombos.stream().map(m -> m.getDishCombo().getName()).collect(Collectors.toList());
 
+        double originalMenuComboPrice = calculateOriginalComboPrice(weddingPackage.getDefaultMenuCombo());
+        double discountedMenuComboPrice = calculateDiscountedComboPrice(weddingPackage.getDefaultMenuCombo());
+
+        double includedServiceTotal = calculateIncludedServiceTotal(services);
+        double beverageAllowanceTotal = calculateBeverageAllowanceTotal(beverages);
+
+        double originalPackageTotal = originalMenuComboPrice + includedServiceTotal + beverageAllowanceTotal;
+        double estimatedPackageTotal = discountedMenuComboPrice + includedServiceTotal + beverageAllowanceTotal;
+
+        double estimatedSavingsAmount = originalPackageTotal - estimatedPackageTotal;
+        double estimatedSavingsRate = calculateSavingsRate(originalPackageTotal, estimatedSavingsAmount);
+
         List<WeddingPackageServiceItemDTO> serviceDTOs = services.stream().map(s -> WeddingPackageServiceItemDTO.builder().id(s.getId()).serviceId(s.getServiceId()).serviceName(s.getServiceName()).quantity(s.getQuantity()).note(s.getNote()).build()).collect(Collectors.toList());
         List<WeddingPackageBeverageAllowanceDTO> beverageDTOs = beverages.stream().map(b -> WeddingPackageBeverageAllowanceDTO.builder().id(b.getId()).beverageId(b.getBeverage().getId()).beverageName(b.getBeverage().getName()).allowanceQuantity(b.getAllowanceQuantity()).note(b.getNote()).build()).collect(Collectors.toList());
         List<WeddingPackageBenefitDTO> benefitDTOs = benefits.stream().map(b -> WeddingPackageBenefitDTO.builder().id(b.getId()).benefitDescription(b.getBenefitDescription()).displayOrder(b.getDisplayOrder()).build()).collect(Collectors.toList());
@@ -455,6 +505,14 @@ public class WeddingPackageServiceImpl implements WeddingPackageService {
                 .packageBenefitList(benefitDTOs)
                 .conditionList(conditionDTOs)
                 .menuComboSummary(menuSummary)
+                .estimatedOriginalMenuComboPrice(originalMenuComboPrice)
+                .estimatedDiscountedMenuComboPrice(discountedMenuComboPrice)
+                .includedServiceTotal(includedServiceTotal)
+                .beverageAllowanceTotal(beverageAllowanceTotal)
+                .originalPackageTotal(originalPackageTotal)
+                .estimatedPackageTotal(estimatedPackageTotal)
+                .estimatedSavingsAmount(estimatedSavingsAmount)
+                .estimatedSavingsRate(estimatedSavingsRate)
                 .serviceSummary(serviceSummary)
                 .beverageAllowanceSummary(beverageSummary)
                 .conditionSummary(conditionSummary)
@@ -475,5 +533,76 @@ public class WeddingPackageServiceImpl implements WeddingPackageService {
         } catch (IllegalArgumentException ignored) {
             // If userId is not a valid UUID, skip audit logging to match the current project style.
         }
+    }
+    private double calculateOriginalComboPrice(DishCombo combo) {
+        if (combo == null || combo.getSlots() == null) {
+            return 0.0;
+        }
+
+        return combo.getSlots().stream()
+                .filter(slot -> slot.getDefaultDish() != null)
+                .mapToDouble(slot -> slot.getDefaultDish().getUnitPrice() == null ? 0.0 : slot.getDefaultDish().getUnitPrice())
+                .sum();
+    }
+
+    private double calculateDiscountedComboPrice(DishCombo combo) {
+        double originalPrice = calculateOriginalComboPrice(combo);
+
+        if (combo == null || combo.getComboDiscountRate() == null) {
+            return originalPrice;
+        }
+
+        double discountRate = combo.getComboDiscountRate();
+
+        return originalPrice * (1 - discountRate / 100.0);
+    }
+
+    private double calculateIncludedServiceTotal(List<WeddingPackageServiceItem> services) {
+        if (services == null || services.isEmpty()) {
+            return 0.0;
+        }
+
+        return services.stream()
+                .mapToDouble(item -> {
+                    if (item.getServiceId() == null) {
+                        return 0.0;
+                    }
+
+                    return serviceRepository.findById(item.getServiceId())
+                            .map(service -> {
+                                double price = service.getPrice() == null ? 0.0 : service.getPrice();
+                                int quantity = item.getQuantity() == null ? 1 : item.getQuantity();
+                                return price * quantity;
+                            })
+                            .orElse(0.0);
+                })
+                .sum();
+    }
+
+    private double calculateBeverageAllowanceTotal(List<WeddingPackageBeverageAllowance> beverages) {
+        if (beverages == null || beverages.isEmpty()) {
+            return 0.0;
+        }
+
+        return beverages.stream()
+                .mapToDouble(item -> {
+                    if (item.getBeverage() == null) {
+                        return 0.0;
+                    }
+
+                    double price = item.getBeverage().getUnitPrice() == null ? 0.0 : item.getBeverage().getUnitPrice();
+                    int quantity = item.getAllowanceQuantity() == null ? 0 : item.getAllowanceQuantity();
+
+                    return price * quantity;
+                })
+                .sum();
+    }
+
+    private double calculateSavingsRate(double originalTotal, double savingsAmount) {
+        if (originalTotal <= 0) {
+            return 0.0;
+        }
+
+        return savingsAmount / originalTotal * 100.0;
     }
 }
