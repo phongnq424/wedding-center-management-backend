@@ -540,7 +540,22 @@ public class BookingServiceImpl implements BookingService {
 
             int benefitOrder = 1;
             for (WeddingPackageBenefit benefit : packageBenefitRepository.findByPackageId(weddingPackage.getId())) {
-                BookingLineRequest benefitLine = toLine(null, benefit.getBenefitDescription(), BookingLineItemType.BENEFIT, 1, 0.0, BookingLineSourceType.PACKAGE_BENEFIT, weddingPackage.getId(), weddingPackage.getName(), false, false);
+                int quantity = benefit.getQuantity() == null ? 1 : benefit.getQuantity();
+
+                String benefitName = buildBenefitLineName(benefit);
+
+                BookingLineRequest benefitLine = toLine(
+                        benefit.getItemId(),
+                        benefitName,
+                        BookingLineItemType.BENEFIT,
+                        quantity,
+                        0.0,
+                        BookingLineSourceType.PACKAGE_BENEFIT,
+                        weddingPackage.getId(),
+                        weddingPackage.getName(),
+                        false,
+                        false
+                );
                 benefitLine.setDisplayOrder(benefitOrder++);
                 lines.add(benefitLine);
             }
@@ -854,6 +869,24 @@ public class BookingServiceImpl implements BookingService {
 
     private double round(double value) {
         return Math.round(value * 100.0) / 100.0;
+    }
+
+    private String buildBenefitLineName(WeddingPackageBenefit benefit) {
+        String itemName = benefit.getItemName() == null
+                ? "Quà tặng"
+                : benefit.getItemName();
+
+        String itemTypeLabel = switch (benefit.getItemType()) {
+            case DISH -> "Món tặng";
+            case SERVICE -> "Dịch vụ tặng";
+            case BEVERAGE -> "Thức uống tặng";
+        };
+
+        String valueText = benefit.getTotalValue() == null
+                ? ""
+                : " - trị giá " + String.format("%,.0f VND", benefit.getTotalValue());
+
+        return itemTypeLabel + ": " + itemName + valueText;
     }
 
     private void saveAuditLog(String userId, String action, UUID targetId, String targetName) {
