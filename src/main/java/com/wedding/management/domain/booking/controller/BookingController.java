@@ -21,7 +21,7 @@ import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/v1/bookings")
-@PreAuthorize("hasRole('EVENT_MANAGER') or hasRole('OPERATIONS_MANAGER')")
+@PreAuthorize("hasAuthority('BOOKING_ACCESS')")
 public class BookingController {
 
     private final BookingService bookingService;

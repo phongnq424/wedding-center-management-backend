@@ -4,6 +4,7 @@ import com.wedding.management.common.audit.AuditLog;
 import com.wedding.management.common.audit.AuditLogRepository;
 import com.wedding.management.common.exception.BadRequestException;
 import com.wedding.management.common.exception.ResourceNotFoundException;
+import com.wedding.management.domain.rbac.model.Role;
 import com.wedding.management.domain.staff.dto.RoleOptionDTO;
 import com.wedding.management.domain.staff.dto.StaffRequest;
 import com.wedding.management.domain.staff.dto.StaffResponse;
@@ -61,7 +62,6 @@ public class StaffServiceImpl implements StaffService {
                 request.getEmail(),
                 request.getPhoneNumber(),
                 request.getRoleId(),
-                request.getRoleName(),
                 request.getStaffImage()
         );
 
@@ -75,22 +75,17 @@ public class StaffServiceImpl implements StaffService {
             throw new BadRequestException("MSG26: Số điện thoại đã tồn tại");
         }
 
-        // BR-CST-1: Role dropdown except Director
-        if (!roleLookupService.isRoleAvailableForStaff(request.getRoleId(), request.getRoleName())) {
-            throw new BadRequestException("MSG2: Vai trò không hợp lệ");
-        }
-
         String activationToken = UUID.randomUUID().toString();
 
-        // BR-CST-4: CreateStaff(...)
+        Role role = roleLookupService.getAvailableRoleForStaff(request.getRoleId());
+
         Staff staff = Staff.builder()
                 .fullName(request.getFullName())
                 .email(request.getEmail())
                 .phoneNumber(request.getPhoneNumber())
                 .description(request.getDescription())
                 .staffImage(request.getStaffImage())
-                .roleId(request.getRoleId())
-                .roleName(request.getRoleName())
+                .role(role)
                 .status(StaffStatus.INACTIVE)
                 .activationToken(activationToken)
                 .activationTokenCreatedAt(Instant.now())
@@ -130,7 +125,6 @@ public class StaffServiceImpl implements StaffService {
                 request.getEmail(),
                 request.getPhoneNumber(),
                 request.getRoleId(),
-                request.getRoleName(),
                 request.getStaffImage()
         );
 
@@ -155,17 +149,15 @@ public class StaffServiceImpl implements StaffService {
             throw new BadRequestException("MSG26: Số điện thoại đã tồn tại");
         }
 
-        // BR-UST-4: Role must be valid and not Director
-        if (!roleLookupService.isRoleAvailableForStaff(request.getRoleId(), request.getRoleName())) {
-            throw new BadRequestException("MSG2: Vai trò không hợp lệ");
-        }
+        Role newRole = roleLookupService.getAvailableRoleForStaff(request.getRoleId());
+
+        boolean roleChanged = staff.getRole() == null
+                || !staff.getRole().getId().equals(newRole.getId());
 
         // BR-UST-4: CheckVersionConflict(staffId, userLastModifiedAt)
         if (staff.getUpdatedAt() != null && staff.getUpdatedAt().toEpochMilli() != lastModifiedAt) {
             throw new BadRequestException("MSG62: Dữ liệu đã được sửa đổi bởi người khác. Vui lòng tải lại trang.");
         }
-
-        boolean roleChanged = !staff.getRoleId().equals(request.getRoleId());
 
         // BR-UST-5: UpdateStaff(...)
         staff.setFullName(request.getFullName());
@@ -173,8 +165,7 @@ public class StaffServiceImpl implements StaffService {
         staff.setPhoneNumber(request.getPhoneNumber());
         staff.setDescription(request.getDescription());
         staff.setStaffImage(request.getStaffImage());
-        staff.setRoleId(request.getRoleId());
-        staff.setRoleName(request.getRoleName());
+        staff.setRole(newRole);
         staff.setStatus(request.getStatus() == null ? staff.getStatus() : request.getStatus());
         staff.setUpdatedBy(currentUserId);
         staff.setUpdatedAt(Instant.now());
@@ -190,7 +181,7 @@ public class StaffServiceImpl implements StaffService {
                     updatedStaff.getId(),
                     updatedStaff.getEmail(),
                     updatedStaff.getFullName(),
-                    updatedStaff.getRoleName()
+                    updatedStaff.getRole().getName()
             );
         }
 
@@ -231,7 +222,7 @@ public class StaffServiceImpl implements StaffService {
 
         if (roleId != null) {
             staffList = staffList.stream()
-                    .filter(s -> s.getRoleId() != null && s.getRoleId().equals(roleId))
+                    .filter(s -> s.getRole() != null && s.getRole().getId().equals(roleId))
                     .collect(Collectors.toList());
         }
 
@@ -310,7 +301,6 @@ public class StaffServiceImpl implements StaffService {
             String email,
             String phoneNumber,
             UUID roleId,
-            String roleName,
             String staffImage
     ) {
         // MSG2: all fields except description must be filled
@@ -324,10 +314,6 @@ public class StaffServiceImpl implements StaffService {
 
         if (phoneNumber == null || phoneNumber.isBlank()) {
             throw new BadRequestException("MSG2: Số điện thoại không được để trống");
-        }
-
-        if (roleId == null || roleName == null || roleName.isBlank()) {
-            throw new BadRequestException("MSG2: Vai trò không được để trống");
         }
 
         if (staffImage == null || staffImage.isBlank()) {
@@ -353,8 +339,8 @@ public class StaffServiceImpl implements StaffService {
                 .phoneNumber(staff.getPhoneNumber())
                 .description(staff.getDescription())
                 .staffImage(staff.getStaffImage())
-                .roleId(staff.getRoleId())
-                .roleName(staff.getRoleName())
+                .roleId(staff.getRole() == null ? null : staff.getRole().getId())
+                .roleName(staff.getRole() == null ? null : staff.getRole().getName())
                 .status(staff.getStatus())
                 .lastModifiedAt(staff.getUpdatedAt())
                 .lastModifiedBy(staff.getUpdatedBy())

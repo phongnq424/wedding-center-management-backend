@@ -1,6 +1,7 @@
 package com.wedding.management.domain.staff.model;
 
 import com.wedding.management.common.entity.BaseEntity;
+import com.wedding.management.domain.rbac.model.Role;
 import com.wedding.management.domain.staff.enums.StaffAccountStatus;
 import com.wedding.management.domain.staff.enums.StaffStatus;
 import jakarta.persistence.*;
@@ -49,11 +50,9 @@ public class Staff extends BaseEntity {
     @Column(name = "staff_image", nullable = false)
     private String staffImage;
 
-    @Column(name = "role_id", nullable = false)
-    private UUID roleId;
-
-    @Column(name = "role_name", nullable = false)
-    private String roleName;
+    @ManyToOne(fetch = FetchType.EAGER, optional = false)
+    @JoinColumn(name = "role_id", nullable = false)
+    private Role role;
 
     @Enumerated(EnumType.STRING)
     @Builder.Default

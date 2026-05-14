@@ -86,14 +86,14 @@ public class AuthServiceImpl implements AuthService {
         staff.setUpdatedAt(Instant.now());
         staffRepository.save(staff);
 
-        if (isFinancialRole(staff.getRoleName())) {
+        if (requires2FA(staff)) {
             String challengeId = mfaService.createChallenge(staff);
             return LoginResponse.builder()
                     .staffId(staff.getId())
                     .fullName(staff.getFullName())
                     .email(staff.getEmail())
-                    .roleId(staff.getRoleId())
-                    .roleName(staff.getRoleName())
+                    .roleId(staff.getRole().getId())
+                    .roleName(staff.getRole().getName())
                     .requires2FA(true)
                     .mfaChallengeId(challengeId)
                     .build();
@@ -194,8 +194,7 @@ public class AuthServiceImpl implements AuthService {
                 .staffImage(request.getStaffImage() == null || request.getStaffImage().isBlank()
                         ? "https://example.com/default-admin.png"
                         : request.getStaffImage())
-                .roleId(role.getId())
-                .roleName(role.getName())
+                .role(role)
                 .status(StaffStatus.ACTIVE)
                 .accountStatus(StaffAccountStatus.ACTIVE)
                 .passwordHash(passwordEncoder.encode(request.getPassword()))
@@ -243,23 +242,25 @@ public class AuthServiceImpl implements AuthService {
                 .staffId(staff.getId())
                 .fullName(staff.getFullName())
                 .email(staff.getEmail())
-                .roleId(staff.getRoleId())
-                .roleName(staff.getRoleName())
+                .roleId(staff.getRole().getId())
+                .roleName(staff.getRole().getName())
                 .requires2FA(false)
                 .accessToken(tokenPair.token())
                 .expiresAt(tokenPair.expiresAt())
                 .build();
     }
 
-    private boolean isFinancialRole(String roleName) {
-        if (roleName == null) {
+    private boolean requires2FA(Staff staff) {
+        if (staff.getRole() == null || staff.getRole().getPermissions() == null) {
             return false;
         }
 
-        String normalized = roleName.trim().toUpperCase();
-        return normalized.equals("ACCOUNTANT")
-                || normalized.equals("FINANCE_MANAGER")
-                || normalized.equals("FINANCIAL_ROLE");
+        return staff.getRole().getPermissions().stream()
+                .anyMatch(permission ->
+                        !Boolean.TRUE.equals(permission.getIsDeleted())
+                                && permission.getStatus() == com.wedding.management.domain.rbac.enums.PermissionStatus.ACTIVE
+                                && "AUTH_2FA_REQUIRED".equalsIgnoreCase(permission.getCode())
+                );
     }
 
     private void saveAuditLog(String userId, String action, UUID targetId, String targetName) {

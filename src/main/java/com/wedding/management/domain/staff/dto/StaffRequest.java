@@ -27,8 +27,6 @@ public class StaffRequest {
     @NotNull(message = "Vai trò không được để trống")
     private UUID roleId;
 
-    @NotBlank(message = "Tên vai trò không được để trống")
-    private String roleName;
 
     private StaffStatus status;
 

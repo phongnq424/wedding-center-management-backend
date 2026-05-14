@@ -27,7 +27,7 @@ public interface RoleRepository extends JpaRepository<Role, UUID> {
 
     @Query("""
        SELECT COUNT(s) FROM Staff s
-       WHERE s.roleId = :roleId
+       WHERE s.role.id = :roleId
        AND s.isDeleted = false
        AND s.status = com.wedding.management.domain.staff.enums.StaffStatus.ACTIVE
        """)

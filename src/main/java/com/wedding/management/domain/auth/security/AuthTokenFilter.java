@@ -1,6 +1,10 @@
 package com.wedding.management.domain.auth.security;
 
 import com.wedding.management.domain.auth.service.AuthTokenService;
+import com.wedding.management.domain.rbac.enums.PermissionStatus;
+import com.wedding.management.domain.rbac.enums.RoleStatus;
+import com.wedding.management.domain.rbac.model.Permission;
+import com.wedding.management.domain.rbac.model.Role;
 import com.wedding.management.domain.staff.enums.StaffAccountStatus;
 import com.wedding.management.domain.staff.enums.StaffStatus;
 import com.wedding.management.domain.staff.model.Staff;
@@ -15,7 +19,8 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
-import java.util.List;
+import java.util.HashSet;
+import java.util.Set;
 
 @Component
 public class AuthTokenFilter extends OncePerRequestFilter {
@@ -40,16 +45,12 @@ public class AuthTokenFilter extends OncePerRequestFilter {
             authTokenService.findValidSessionByRawToken(token).ifPresent(session -> {
                 Staff staff = session.getStaff();
 
-                if (!Boolean.TRUE.equals(staff.getIsDeleted())
-                        && staff.getStatus() == StaffStatus.ACTIVE
-                        && staff.getAccountStatus() == StaffAccountStatus.ACTIVE) {
-                    String roleName = staff.getRoleName() == null ? "STAFF" : staff.getRoleName().trim().toUpperCase();
-
+                if (isAuthenticationAllowed(staff)) {
                     UsernamePasswordAuthenticationToken authentication =
                             new UsernamePasswordAuthenticationToken(
                                     staff,
                                     null,
-                                    List.of(new SimpleGrantedAuthority("ROLE_" + roleName))
+                                    buildAuthorities(staff)
                             );
 
                     SecurityContextHolder.getContext().setAuthentication(authentication);
@@ -58,5 +59,42 @@ public class AuthTokenFilter extends OncePerRequestFilter {
         }
 
         filterChain.doFilter(request, response);
+    }
+
+    private boolean isAuthenticationAllowed(Staff staff) {
+        return staff != null
+                && !Boolean.TRUE.equals(staff.getIsDeleted())
+                && staff.getStatus() == StaffStatus.ACTIVE
+                && staff.getAccountStatus() == StaffAccountStatus.ACTIVE
+                && staff.getRole() != null
+                && !Boolean.TRUE.equals(staff.getRole().getIsDeleted())
+                && staff.getRole().getStatus() == RoleStatus.ACTIVE;
+    }
+
+    private Set<SimpleGrantedAuthority> buildAuthorities(Staff staff) {
+        Set<SimpleGrantedAuthority> authorities = new HashSet<>();
+
+        Role role = staff.getRole();
+
+        if (role.getName() != null && !role.getName().isBlank()) {
+            authorities.add(new SimpleGrantedAuthority(
+                    "ROLE_" + role.getName().trim().toUpperCase()
+            ));
+        }
+
+        if (role.getPermissions() != null) {
+            for (Permission permission : role.getPermissions()) {
+                if (permission.getCode() != null
+                        && !permission.getCode().isBlank()
+                        && !Boolean.TRUE.equals(permission.getIsDeleted())
+                        && permission.getStatus() == PermissionStatus.ACTIVE) {
+                    authorities.add(new SimpleGrantedAuthority(
+                            permission.getCode().trim().toUpperCase()
+                    ));
+                }
+            }
+        }
+
+        return authorities;
     }
 }
