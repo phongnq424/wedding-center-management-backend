@@ -15,7 +15,7 @@ import java.util.*;
 
 @RestController
 @RequestMapping("/api/v1/beverages")
-@PreAuthorize("hasRole('OPERATIONS_MANAGER')")
+@PreAuthorize("hasAuthority('MENU_FULL_ACCESS')")
 public class BeverageController {
     private final BeverageService beverageService;
     public BeverageController(BeverageService beverageService) { this.beverageService = beverageService; }

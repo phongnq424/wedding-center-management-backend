@@ -20,7 +20,7 @@ import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/v1/shifts")
-@PreAuthorize("hasRole('OPERATIONS_MANAGER')")
+@PreAuthorize("hasAuthority('SHIFT_FULL_ACCESS')")
 public class ShiftController {
 
     private final ShiftService shiftService;

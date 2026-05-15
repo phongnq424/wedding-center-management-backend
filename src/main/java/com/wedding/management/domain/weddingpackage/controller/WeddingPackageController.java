@@ -15,7 +15,7 @@ import java.util.*;
 
 @RestController
 @RequestMapping("/api/v1/wedding-packages")
-@PreAuthorize("hasRole('OPERATIONS_MANAGER')")
+@PreAuthorize("hasAuthority('PACKAGE_FULL_ACCESS')")
 public class WeddingPackageController {
     private final WeddingPackageService weddingPackageService;
 

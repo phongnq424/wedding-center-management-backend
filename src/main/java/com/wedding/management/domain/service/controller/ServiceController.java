@@ -20,7 +20,7 @@ import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/v1/services")
-@PreAuthorize("hasRole('OPERATIONS_MANAGER')")
+@PreAuthorize("hasAuthority('SERVICE_FULL_ACCESS')")
 public class ServiceController {
 
         private final ServiceService serviceService;

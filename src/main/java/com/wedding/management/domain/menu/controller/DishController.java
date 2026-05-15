@@ -16,7 +16,7 @@ import java.util.*;
 
 @RestController
 @RequestMapping("/api/v1/dishes")
-@PreAuthorize("hasRole('OPERATIONS_MANAGER')")
+@PreAuthorize("hasAuthority('MENU_FULL_ACCESS')")
 public class DishController {
     private final DishService dishService;
 

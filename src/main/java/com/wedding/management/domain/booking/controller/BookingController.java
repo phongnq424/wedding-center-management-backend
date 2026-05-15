@@ -21,7 +21,7 @@ import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/v1/bookings")
-@PreAuthorize("hasAuthority('BOOKING_ACCESS')")
+@PreAuthorize("hasAuthority('BOOKING_FULL_ACCESS')")
 public class BookingController {
 
     private final BookingService bookingService;

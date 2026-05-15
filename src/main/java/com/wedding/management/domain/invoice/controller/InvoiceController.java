@@ -14,7 +14,7 @@ import java.util.*;
 
 @RestController
 @RequestMapping("/api/v1/invoices")
-@PreAuthorize("hasRole('OPERATIONS_MANAGER')")
+@PreAuthorize("hasAuthority('BEVERAGE_FULL_ACCESS')")
 public class InvoiceController {
     private final InvoiceService invoiceService;
 

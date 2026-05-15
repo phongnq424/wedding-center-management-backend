@@ -15,7 +15,7 @@ import java.util.*;
 
 @RestController
 @RequestMapping("/api/v1/dish-combos")
-@PreAuthorize("hasRole('OPERATIONS_MANAGER')")
+@PreAuthorize("hasAuthority('MENU_FULL_ACCESS')")
 public class DishComboController {
     private final DishComboService dishComboService;
     public DishComboController(DishComboService dishComboService) { this.dishComboService = dishComboService; }

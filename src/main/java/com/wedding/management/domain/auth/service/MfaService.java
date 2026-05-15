@@ -27,7 +27,9 @@ public class MfaService {
     public String createChallenge(Staff staff) {
         String challengeId = UUID.randomUUID().toString();
         String code = generateOtpCode();
-
+        System.out.println("CREATE MFA CHALLENGE");
+        System.out.println("MFA TO EMAIL = " + staff.getEmail());
+        System.out.println("MFA CHALLENGE ID = " + challengeId);
         challenges.put(
                 challengeId,
                 new MfaChallenge(

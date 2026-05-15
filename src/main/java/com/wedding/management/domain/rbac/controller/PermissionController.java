@@ -19,7 +19,7 @@ import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/v1/permissions")
-@PreAuthorize("hasRole('DIRECTOR')")
+@PreAuthorize("hasAuthority('PERMISSION_FULL_ACCESS')")
 public class PermissionController {
 
     private final PermissionService permissionService;

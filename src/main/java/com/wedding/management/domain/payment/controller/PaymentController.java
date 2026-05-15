@@ -14,7 +14,7 @@ import java.util.*;
 
 @RestController
 @RequestMapping("/api/v1/payments")
-@PreAuthorize("hasRole('OPERATIONS_MANAGER')")
+@PreAuthorize("hasAuthority('PAYMENT_FULL_ACCESS')")
 public class PaymentController {
     private final PaymentService paymentService;
 
