@@ -20,7 +20,7 @@ import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/v1/hall-types")
-@PreAuthorize("hasRole('OPERATIONS_MANAGER')")
+@PreAuthorize("hasAuthority('HALL_TYPE_FULL_ACCESS')")
 public class HallTypeController {
 
         private final HallTypeService hallTypeService;
