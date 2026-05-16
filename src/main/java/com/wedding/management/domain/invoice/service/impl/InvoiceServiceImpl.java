@@ -97,8 +97,13 @@ public class InvoiceServiceImpl implements InvoiceService, InvoicePaymentSyncSer
         Invoice invoice = getInvoice(invoiceId);
         if (!(invoice.getStatus() == InvoiceStatus.DRAFT || invoice.getStatus() == InvoiceStatus.REJECTED))
             throw bad("MSG72: Chỉ invoice DRAFT hoặc REJECTED mới được phát hành");
-        if (!twoFactorVerificationService.verify(currentUserId, request.getInputCode()))
+        if (!twoFactorVerificationService.verify(
+                currentUserId,
+                request.getMfaChallengeId(),
+                request.getInputCode()
+        )) {
             throw bad("MSG56: Mã 2FA không hợp lệ hoặc đã hết hạn");
+        }
         if (invoiceLineRepository.findByInvoiceId(invoice.getId()).isEmpty())
             throw bad("MSG72: Invoice không có dòng snapshot");
 
