@@ -2,6 +2,7 @@ package com.wedding.management.domain.booking.dto;
 
 import com.wedding.management.domain.booking.enums.BookingMode;
 import com.wedding.management.domain.booking.enums.BookingStatus;
+import com.wedding.management.domain.booking.enums.ManualMenuMode;
 import lombok.Builder;
 import lombok.Data;
 
@@ -43,6 +44,8 @@ public class BookingResponse {
     private BookingStatus status;
     private String cancelReason;
     private List<BookingLineResponse> bookingLines;
+    private ManualMenuMode manualMenuMode;
+    private List<BookingMenuComboSnapshotResponse> menuComboSnapshots;
     private Instant lastModifiedAt;
     private String lastModifiedBy;
 }

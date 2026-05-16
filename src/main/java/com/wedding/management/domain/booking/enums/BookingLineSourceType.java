@@ -6,5 +6,7 @@ public enum BookingLineSourceType {
     PACKAGE_OPTIONAL,
     PACKAGE_BENEFIT,
     PACKAGE_DISCOUNT,
+
+    MANUAL_COMBO,
     MANUAL_EXTRA
 }

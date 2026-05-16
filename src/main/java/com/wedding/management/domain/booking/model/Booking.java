@@ -3,6 +3,7 @@ package com.wedding.management.domain.booking.model;
 import com.wedding.management.common.entity.BaseEntity;
 import com.wedding.management.domain.booking.enums.BookingMode;
 import com.wedding.management.domain.booking.enums.BookingStatus;
+import com.wedding.management.domain.booking.enums.ManualMenuMode;
 import com.wedding.management.domain.hall.model.Hall;
 import com.wedding.management.domain.menu.model.DishCombo;
 import com.wedding.management.domain.shift.model.Shift;
@@ -111,4 +112,11 @@ public class Booking extends BaseEntity {
 
     @OneToMany(mappedBy = "booking", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
     private List<BookingLineSnapshot> lineSnapshots;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "manual_menu_mode")
+    private ManualMenuMode manualMenuMode;
+
+    @OneToMany(mappedBy = "booking", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
+    private List<BookingMenuComboSnapshot> menuComboSnapshots;
 }

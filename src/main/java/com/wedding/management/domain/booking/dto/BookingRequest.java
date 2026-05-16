@@ -2,6 +2,7 @@ package com.wedding.management.domain.booking.dto;
 
 import com.wedding.management.domain.booking.enums.BookingMode;
 import com.wedding.management.domain.booking.enums.BookingStatus;
+import com.wedding.management.domain.booking.enums.ManualMenuMode;
 import jakarta.validation.constraints.*;
 import lombok.Data;
 
@@ -55,4 +56,6 @@ public class BookingRequest {
     private Double depositAmount;
     private String note;
     private BookingStatus status;
+    private ManualMenuMode manualMenuMode;
+    private List<BookingMenuComboRequest> manualComboSelections;
 }

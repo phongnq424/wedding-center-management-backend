@@ -191,6 +191,11 @@ public class BookingServiceImpl implements BookingService {
                 .numberOfTables(request.getNumberOfTables())
                 .numberOfReserveTables(request.getNumberOfReserveTables())
                 .bookingMode(request.getBookingMode())
+                .manualMenuMode(
+                        request.getBookingMode() == BookingMode.MANUAL
+                                ? request.getManualMenuMode()
+                                : null
+                )
                 .weddingPackage(weddingPackage)
                 .selectedMenuCombo(selectedMenuCombo)
                 .hallPrice(hallPrice)
@@ -210,6 +215,15 @@ public class BookingServiceImpl implements BookingService {
         Booking savedBooking = bookingRepository.save(booking);
         saveLineSnapshots(savedBooking, draftLines, currentUserId);
         savePackageSnapshot(savedBooking, weddingPackage, selectedMenuCombo, currentUserId);
+
+        if (request.getBookingMode() == BookingMode.MANUAL
+                && request.getManualMenuMode() == ManualMenuMode.COMBO) {
+            saveManualComboSnapshots(
+                    savedBooking,
+                    request.getManualComboSelections(),
+                    currentUserId
+            );
+        }
         convertHold(hall.getId(), shift.getId(), bookingInstant, currentUserId, savedBooking);
 
         // BR-CBK-13 / BR-CBK-14
@@ -285,6 +299,11 @@ public class BookingServiceImpl implements BookingService {
         booking.setNumberOfTables(request.getNumberOfTables());
         booking.setNumberOfReserveTables(request.getNumberOfReserveTables());
         booking.setBookingMode(request.getBookingMode());
+        booking.setManualMenuMode(
+                request.getBookingMode() == BookingMode.MANUAL
+                        ? request.getManualMenuMode()
+                        : null
+        );
         booking.setWeddingPackage(newPackage);
         booking.setSelectedMenuCombo(newSelectedCombo);
         booking.setHallPrice(calculateHallPrice(newHall, newShift, request.getBookingDate()));
@@ -304,6 +323,16 @@ public class BookingServiceImpl implements BookingService {
         saveLineSnapshots(updatedBooking, draftLines, currentUserId);
         packageSnapshotRepository.deleteByBookingId(updatedBooking.getId());
         savePackageSnapshot(updatedBooking, newPackage, newSelectedCombo, currentUserId);
+        menuComboSnapshotRepository.deleteByBookingId(updatedBooking.getId());
+
+        if (request.getBookingMode() == BookingMode.MANUAL
+                && request.getManualMenuMode() == ManualMenuMode.COMBO) {
+            saveManualComboSnapshots(
+                    updatedBooking,
+                    request.getManualComboSelections(),
+                    currentUserId
+            );
+        }
 
         if (slotChanged) {
             convertHold(newHall.getId(), newShift.getId(), newBookingDate, currentUserId, updatedBooking);
@@ -455,17 +484,79 @@ public class BookingServiceImpl implements BookingService {
     }
 
     private void validateBookingInput(BookingRequest request, boolean create) {
-        if (request.getBookingDate() == null || request.getShiftId() == null || request.getHallId() == null) throw new BadRequestException("MSG2: Ngày, ca và sảnh không được để trống");
-        if (isBlank(request.getCustomerName())) throw new BadRequestException("MSG2: Tên khách hàng không được để trống");
-        if (isBlank(request.getCustomerPhone())) throw new BadRequestException("MSG2: Số điện thoại không được để trống");
-        if (!PHONE_PATTERN.matcher(request.getCustomerPhone()).matches()) throw new BadRequestException("MSG30: Số điện thoại không hợp lệ");
-        if (request.getCustomerEmail() != null && !request.getCustomerEmail().isBlank() && !EMAIL_PATTERN.matcher(request.getCustomerEmail()).matches()) throw new BadRequestException("MSG31: Email không hợp lệ");
-        if (isBlank(request.getBrideName())) throw new BadRequestException("MSG2: Tên cô dâu không được để trống");
-        if (isBlank(request.getGroomName())) throw new BadRequestException("MSG2: Tên chú rể không được để trống");
-        if (request.getWeddingDate() == null) throw new BadRequestException("MSG2: Ngày cưới không được để trống");
-        if (request.getBookingMode() == null) throw new BadRequestException("MSG2: Chế độ đặt tiệc không được để trống");
-        if (request.getBookingMode() == BookingMode.PACKAGE && request.getPackageId() == null) throw new BadRequestException("MSG2: Gói tiệc không được để trống");
-        if (request.getBookingMode() == BookingMode.MANUAL && (request.getBookingDraftLines() == null || request.getBookingDraftLines().isEmpty())) throw new BadRequestException("MSG2: Danh sách món/dịch vụ không được để trống");
+        if (request.getBookingDate() == null || request.getShiftId() == null || request.getHallId() == null) {
+            throw new BadRequestException("MSG2: Ngày, ca và sảnh không được để trống");
+        }
+
+        if (isBlank(request.getCustomerName())) {
+            throw new BadRequestException("MSG2: Tên khách hàng không được để trống");
+        }
+
+        if (isBlank(request.getCustomerPhone())) {
+            throw new BadRequestException("MSG2: Số điện thoại không được để trống");
+        }
+
+        if (!PHONE_PATTERN.matcher(request.getCustomerPhone()).matches()) {
+            throw new BadRequestException("MSG30: Số điện thoại không hợp lệ");
+        }
+
+        if (request.getCustomerEmail() != null
+                && !request.getCustomerEmail().isBlank()
+                && !EMAIL_PATTERN.matcher(request.getCustomerEmail()).matches()) {
+            throw new BadRequestException("MSG31: Email không hợp lệ");
+        }
+
+        if (isBlank(request.getBrideName())) {
+            throw new BadRequestException("MSG2: Tên cô dâu không được để trống");
+        }
+
+        if (isBlank(request.getGroomName())) {
+            throw new BadRequestException("MSG2: Tên chú rể không được để trống");
+        }
+
+        if (request.getWeddingDate() == null) {
+            throw new BadRequestException("MSG2: Ngày cưới không được để trống");
+        }
+
+        if (request.getBookingMode() == null) {
+            throw new BadRequestException("MSG2: Chế độ đặt tiệc không được để trống");
+        }
+
+        if (request.getBookingMode() == BookingMode.PACKAGE && request.getPackageId() == null) {
+            throw new BadRequestException("MSG2: Gói tiệc không được để trống");
+        }
+
+        if (request.getBookingMode() == BookingMode.MANUAL) {
+            if (request.getManualMenuMode() == null) {
+                throw new BadRequestException("MSG2: Chế độ thực đơn manual không được để trống");
+            }
+
+            if (request.getManualMenuMode() == ManualMenuMode.COMBO) {
+                if (request.getManualComboSelections() == null || request.getManualComboSelections().isEmpty()) {
+                    throw new BadRequestException("MSG2: Danh sách combo món ăn không được để trống");
+                }
+
+                int totalComboTables = request.getManualComboSelections()
+                        .stream()
+                        .mapToInt(combo -> combo.getTableCount() == null ? 0 : combo.getTableCount())
+                        .sum();
+
+                if (!Objects.equals(totalComboTables, request.getNumberOfTables())) {
+                    throw new BadRequestException("MSG2: Tổng số bàn của các combo phải bằng số bàn booking");
+                }
+            }
+
+            if (request.getManualMenuMode() == ManualMenuMode.CUSTOM) {
+                boolean hasDishLine = request.getBookingDraftLines() != null
+                        && request.getBookingDraftLines()
+                        .stream()
+                        .anyMatch(line -> line.getItemType() == BookingLineItemType.DISH);
+
+                if (!hasDishLine) {
+                    throw new BadRequestException("MSG2: Danh sách món ăn không được để trống");
+                }
+            }
+        }
     }
 
     private void validateTableInput(Integer tables, Integer reserveTables, Hall hall) {
@@ -513,35 +604,73 @@ public class BookingServiceImpl implements BookingService {
                 });
     }
 
-    private List<BookingLineRequest> initializeDraftLines(BookingRequest request, WeddingPackage weddingPackage, DishCombo selectedMenuCombo, Hall hall, double hallPrice) {
+    private List<BookingLineRequest> initializeDraftLines(
+            BookingRequest request,
+            WeddingPackage weddingPackage,
+            DishCombo selectedMenuCombo,
+            Hall hall,
+            double hallPrice
+    ) {
         List<BookingLineRequest> lines = new ArrayList<>();
+
         lines.add(systemHallLine(hall, hallPrice));
 
         if (request.getBookingMode() == BookingMode.PACKAGE && weddingPackage != null) {
-            // selected menu combo -> dish-level lines
             if (selectedMenuCombo != null) {
-                for (DishComboSlot slot : dishComboSlotRepository.findByComboId(selectedMenuCombo.getId())) {
-                    Dish dish = slot.getDefaultDish();
-                    lines.add(toLine(dish.getId(), dish.getName(), BookingLineItemType.DISH, 1, dish.getUnitPrice(), BookingLineSourceType.PACKAGE_INCLUDED, selectedMenuCombo.getId(), selectedMenuCombo.getName(), false, false));
-                }
+                lines.addAll(buildComboDishLines(
+                        selectedMenuCombo,
+                        request.getNumberOfTables(),
+                        Map.of(),
+                        BookingLineSourceType.PACKAGE_INCLUDED,
+                        selectedMenuCombo.getId(),
+                        selectedMenuCombo.getName(),
+                        false,
+                        false
+                ));
             }
 
             for (WeddingPackageServiceItem item : packageServiceItemRepository.findByPackageId(weddingPackage.getId())) {
-                com.wedding.management.domain.service.model.Service service = serviceRepository.findByIdAndIsDeletedFalse(item.getServiceId()).orElse(null);
+                com.wedding.management.domain.service.model.Service service =
+                        serviceRepository.findByIdAndIsDeletedFalse(item.getServiceId()).orElse(null);
+
                 double price = service == null ? 0.0 : service.getPrice();
                 String name = service == null ? item.getServiceName() : service.getName();
-                lines.add(toLine(item.getServiceId(), name, BookingLineItemType.SERVICE, item.getQuantity() == null ? 1 : item.getQuantity(), price, BookingLineSourceType.PACKAGE_INCLUDED, weddingPackage.getId(), weddingPackage.getName(), false, false));
+
+                lines.add(toLine(
+                        item.getServiceId(),
+                        name,
+                        BookingLineItemType.SERVICE,
+                        item.getQuantity() == null ? 1 : item.getQuantity(),
+                        price,
+                        BookingLineSourceType.PACKAGE_INCLUDED,
+                        weddingPackage.getId(),
+                        weddingPackage.getName(),
+                        false,
+                        false
+                ));
             }
 
             for (WeddingPackageBeverageAllowance allowance : packageBeverageAllowanceRepository.findByPackageId(weddingPackage.getId())) {
                 Beverage beverage = allowance.getBeverage();
-                lines.add(toLine(beverage.getId(), beverage.getName(), BookingLineItemType.BEVERAGE, allowance.getAllowanceQuantity(), beverage.getUnitPrice(), BookingLineSourceType.PACKAGE_INCLUDED, weddingPackage.getId(), weddingPackage.getName(), false, false));
+
+                lines.add(toLine(
+                        beverage.getId(),
+                        beverage.getName(),
+                        BookingLineItemType.BEVERAGE,
+                        allowance.getAllowanceQuantity(),
+                        beverage.getUnitPrice(),
+                        BookingLineSourceType.PACKAGE_INCLUDED,
+                        weddingPackage.getId(),
+                        weddingPackage.getName(),
+                        false,
+                        false
+                ));
             }
 
             int benefitOrder = 1;
+
             for (WeddingPackageBenefit benefit : packageBenefitRepository.findByPackageId(weddingPackage.getId())) {
                 int quantity = benefit.getQuantity() == null ? 1 : benefit.getQuantity();
-
                 String benefitName = buildBenefitLineName(benefit);
 
                 BookingLineRequest benefitLine = toLine(
@@ -556,18 +685,132 @@ public class BookingServiceImpl implements BookingService {
                         false,
                         false
                 );
+
                 benefitLine.setDisplayOrder(benefitOrder++);
                 lines.add(benefitLine);
             }
         }
 
+        if (request.getBookingMode() == BookingMode.MANUAL
+                && request.getManualMenuMode() == ManualMenuMode.COMBO) {
+            lines.addAll(buildManualComboDishLines(request.getManualComboSelections()));
+        }
+
         if (request.getBookingDraftLines() != null) {
             for (BookingLineRequest line : request.getBookingDraftLines()) {
-                if (line.getItemType() != BookingLineItemType.HALL) lines.add(normalizeLine(line));
+                if (line.getItemType() == BookingLineItemType.HALL) {
+                    continue;
+                }
+
+                if (request.getBookingMode() == BookingMode.MANUAL
+                        && request.getManualMenuMode() == ManualMenuMode.COMBO
+                        && line.getItemType() == BookingLineItemType.DISH) {
+                    continue;
+                }
+
+                lines.add(normalizeLine(line));
             }
         }
 
         reassignDisplayOrder(lines);
+        return lines;
+    }
+    private List<BookingLineRequest> buildComboDishLines(
+            DishCombo combo,
+            Integer tableCount,
+            Map<UUID, UUID> replacementMap,
+            BookingLineSourceType sourceType,
+            UUID sourceId,
+            String sourceName,
+            boolean editable,
+            boolean removable
+    ) {
+        List<BookingLineRequest> lines = new ArrayList<>();
+
+        double discountRate = combo.getComboDiscountRate() == null ? 0.0 : combo.getComboDiscountRate();
+        int quantity = tableCount == null ? 1 : tableCount;
+
+        for (DishComboSlot slot : dishComboSlotRepository.findByComboId(combo.getId())) {
+            Dish defaultDish = slot.getDefaultDish();
+
+            if (defaultDish == null) {
+                continue;
+            }
+
+            UUID selectedDishId = replacementMap == null
+                    ? defaultDish.getId()
+                    : replacementMap.getOrDefault(slot.getId(), defaultDish.getId());
+
+            Dish selectedDish = dishRepository.findByIdAndIsDeletedFalse(selectedDishId)
+                    .orElseThrow(() -> new ResourceNotFoundException("Món ăn không tồn tại"));
+
+            if (selectedDish.getStatus() != DishStatus.ACTIVE) {
+                throw new BadRequestException("MSG2: Món ăn không hoạt động");
+            }
+
+            double unitPrice = selectedDish.getUnitPrice() == null ? 0.0 : selectedDish.getUnitPrice();
+            double discountAmount = unitPrice * quantity * discountRate / 100.0;
+
+            BookingLineRequest line = toLine(
+                    selectedDish.getId(),
+                    selectedDish.getName(),
+                    BookingLineItemType.DISH,
+                    quantity,
+                    unitPrice,
+                    sourceType,
+                    sourceId,
+                    sourceName,
+                    editable,
+                    removable
+            );
+
+            line.setDiscountAmount(round(discountAmount));
+            line.setTaxRate(DEFAULT_TAX_RATE);
+
+            lines.add(line);
+        }
+
+        return lines;
+    }
+    private List<BookingLineRequest> buildManualComboDishLines(
+            List<BookingMenuComboRequest> comboRequests
+    ) {
+        if (comboRequests == null || comboRequests.isEmpty()) {
+            return List.of();
+        }
+
+        List<BookingLineRequest> lines = new ArrayList<>();
+
+        for (BookingMenuComboRequest comboRequest : comboRequests) {
+            DishCombo combo = dishComboRepository.findByIdAndIsDeletedFalse(comboRequest.getComboId())
+                    .orElseThrow(() -> new ResourceNotFoundException("Combo món ăn không tồn tại"));
+
+            if (combo.getStatus() != DishComboStatus.ACTIVE) {
+                throw new BadRequestException("MSG2: Combo món ăn không hoạt động");
+            }
+
+            Map<UUID, UUID> replacementMap = comboRequest.getSlotReplacements() == null
+                    ? Map.of()
+                    : comboRequest.getSlotReplacements()
+                    .stream()
+                    .collect(Collectors.toMap(
+                            BookingMenuComboSlotReplacementRequest::getSlotId,
+                            BookingMenuComboSlotReplacementRequest::getDishId,
+                            (oldValue, newValue) -> newValue
+                    ));
+
+            lines.addAll(buildComboDishLines(
+                    combo,
+                    comboRequest.getTableCount(),
+                    replacementMap,
+                    BookingLineSourceType.MANUAL_COMBO,
+                    combo.getId(),
+                    combo.getName(),
+                    true,
+                    true
+            ));
+        }
+
         return lines;
     }
 
@@ -674,7 +917,120 @@ public class BookingServiceImpl implements BookingService {
                 .build();
         packageSnapshotRepository.save(snapshot);
     }
+    private void saveManualComboSnapshots(
+            Booking booking,
+            List<BookingMenuComboRequest> comboRequests,
+            String currentUserId
+    ) {
+        if (comboRequests == null || comboRequests.isEmpty()) {
+            return;
+        }
 
+        int comboOrder = 1;
+
+        for (BookingMenuComboRequest comboRequest : comboRequests) {
+            DishCombo combo = dishComboRepository.findByIdAndIsDeletedFalse(comboRequest.getComboId())
+                    .orElseThrow(() -> new ResourceNotFoundException("Combo món ăn không tồn tại"));
+
+            if (combo.getStatus() != DishComboStatus.ACTIVE) {
+                throw new BadRequestException("MSG2: Combo món ăn không hoạt động");
+            }
+
+            double discountRate = combo.getComboDiscountRate() == null ? 0.0 : combo.getComboDiscountRate();
+
+            Map<UUID, UUID> replacementMap = comboRequest.getSlotReplacements() == null
+                    ? Map.of()
+                    : comboRequest.getSlotReplacements()
+                    .stream()
+                    .collect(Collectors.toMap(
+                            BookingMenuComboSlotReplacementRequest::getSlotId,
+                            BookingMenuComboSlotReplacementRequest::getDishId,
+                            (oldValue, newValue) -> newValue
+                    ));
+
+            List<DishComboSlot> slots = dishComboSlotRepository.findByComboId(combo.getId());
+
+            double originalComboPrice = 0.0;
+
+            for (DishComboSlot slot : slots) {
+                Dish defaultDish = slot.getDefaultDish();
+
+                if (defaultDish == null) {
+                    continue;
+                }
+
+                UUID selectedDishId = replacementMap.getOrDefault(slot.getId(), defaultDish.getId());
+
+                Dish selectedDish = dishRepository.findByIdAndIsDeletedFalse(selectedDishId)
+                        .orElseThrow(() -> new ResourceNotFoundException("Món ăn không tồn tại"));
+
+                if (selectedDish.getStatus() != DishStatus.ACTIVE) {
+                    throw new BadRequestException("MSG2: Món ăn không hoạt động");
+                }
+
+                originalComboPrice += selectedDish.getUnitPrice() == null ? 0.0 : selectedDish.getUnitPrice();
+            }
+
+            double discountedComboPrice = originalComboPrice * (1 - discountRate / 100.0);
+
+            BookingMenuComboSnapshot comboSnapshot = BookingMenuComboSnapshot.builder()
+                    .booking(booking)
+                    .comboId(combo.getId())
+                    .comboName(combo.getName())
+                    .tableCount(comboRequest.getTableCount())
+                    .originalComboPrice(round(originalComboPrice))
+                    .discountRate(discountRate)
+                    .discountedComboPrice(round(discountedComboPrice))
+                    .displayOrder(comboOrder++)
+                    .createdBy(currentUserId)
+                    .createdAt(Instant.now())
+                    .isDeleted(false)
+                    .build();
+
+            BookingMenuComboSnapshot savedComboSnapshot =
+                    menuComboSnapshotRepository.save(comboSnapshot);
+
+            int slotOrder = 1;
+
+            for (DishComboSlot slot : slots) {
+                Dish defaultDish = slot.getDefaultDish();
+
+                if (defaultDish == null) {
+                    continue;
+                }
+
+                UUID selectedDishId = replacementMap.getOrDefault(slot.getId(), defaultDish.getId());
+
+                Dish selectedDish = dishRepository.findByIdAndIsDeletedFalse(selectedDishId)
+                        .orElseThrow(() -> new ResourceNotFoundException("Món ăn không tồn tại"));
+
+                if (selectedDish.getStatus() != DishStatus.ACTIVE) {
+                    throw new BadRequestException("MSG2: Món ăn không hoạt động");
+                }
+
+                boolean replaced = !selectedDish.getId().equals(defaultDish.getId());
+
+                BookingMenuComboSlotSnapshot slotSnapshot = BookingMenuComboSlotSnapshot.builder()
+                        .comboSnapshot(savedComboSnapshot)
+                        .slotId(slot.getId())
+                        .slotName(resolveSlotName(slot, slotOrder))
+                        .originalDishId(defaultDish.getId())
+                        .originalDishName(defaultDish.getName())
+                        .originalDishPrice(defaultDish.getUnitPrice() == null ? 0.0 : defaultDish.getUnitPrice())
+                        .selectedDishId(selectedDish.getId())
+                        .selectedDishName(selectedDish.getName())
+                        .selectedDishPrice(selectedDish.getUnitPrice() == null ? 0.0 : selectedDish.getUnitPrice())
+                        .replaced(replaced)
+                        .displayOrder(slotOrder++)
+                        .createdBy(currentUserId)
+                        .createdAt(Instant.now())
+                        .isDeleted(false)
+                        .build();
+
+                menuComboSlotSnapshotRepository.save(slotSnapshot);
+            }
+        }
+    }
     private String buildPackagePolicySnapshot(WeddingPackage weddingPackage) {
         return "WeddingPackageSnapshot{name='" + weddingPackage.getName() + "', status='" + weddingPackage.getStatus() + "'}";
     }
