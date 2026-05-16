@@ -3,7 +3,9 @@ package com.wedding.management.domain.booking.dto;
 import com.wedding.management.domain.booking.enums.BookingMode;
 import com.wedding.management.domain.booking.enums.BookingStatus;
 import com.wedding.management.domain.booking.enums.ManualMenuMode;
-import jakarta.validation.constraints.*;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import lombok.Data;
 
 import java.time.LocalDate;
@@ -12,6 +14,7 @@ import java.util.UUID;
 
 @Data
 public class BookingRequest {
+
     @NotNull(message = "Ngày đặt tiệc không được để trống")
     private LocalDate bookingDate;
 
@@ -47,15 +50,50 @@ public class BookingRequest {
     @NotNull(message = "Chế độ đặt tiệc không được để trống")
     private BookingMode bookingMode;
 
+    /**
+     * PACKAGE mode only.
+     */
     private UUID packageId;
+
+    /**
+     * PACKAGE mode only.
+     */
     private UUID selectedMenuComboId;
+
+    /**
+     * PACKAGE:
+     * - giữ nguyên logic cũ của package.
+     *
+     * MANUAL + CUSTOM:
+     * - chứa DISH, SERVICE, BEVERAGE, CUSTOM.
+     *
+     * MANUAL + COMBO:
+     * - chỉ nên chứa SERVICE, BEVERAGE, CUSTOM.
+     * - DISH sẽ được backend sinh từ manualComboSelections để tránh duplicate và để reconstruct combo đúng.
+     */
+    @Valid
     private List<BookingLineRequest> bookingDraftLines;
 
     private Integer softDrinkQuantity;
+
     private Integer beerQuantity;
+
     private Double depositAmount;
+
     private String note;
+
     private BookingStatus status;
+
+    /**
+     * MANUAL mode only.
+     * COMBO: chọn combo món ăn.
+     * CUSTOM: tự chọn từng món.
+     */
     private ManualMenuMode manualMenuMode;
+
+    /**
+     * MANUAL + COMBO only.
+     */
+    @Valid
     private List<BookingMenuComboRequest> manualComboSelections;
 }

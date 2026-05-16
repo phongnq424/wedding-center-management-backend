@@ -18,6 +18,10 @@ public class BookingMenuComboRequest {
     @Min(value = 1, message = "Số bàn áp dụng combo phải lớn hơn 0")
     private Integer tableCount;
 
+    /**
+     * Danh sách món thay thế theo slot.
+     * Nếu slot không có trong danh sách này thì dùng món gốc của combo.
+     */
     @Valid
     private List<BookingMenuComboSlotReplacementRequest> slotReplacements;
 }

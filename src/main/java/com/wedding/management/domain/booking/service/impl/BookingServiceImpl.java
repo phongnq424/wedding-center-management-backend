@@ -53,20 +53,25 @@ public class BookingServiceImpl implements BookingService {
     private final BookingRepository bookingRepository;
     private final BookingLineSnapshotRepository lineRepository;
     private final BookingPackageSnapshotRepository packageSnapshotRepository;
+    private final BookingMenuComboSnapshotRepository menuComboSnapshotRepository;
     private final BookingHallHoldRepository holdRepository;
+
     private final HallRepository hallRepository;
     private final HallPricingRepository hallPricingRepository;
     private final ShiftRepository shiftRepository;
+
     private final WeddingPackageRepository weddingPackageRepository;
     private final WeddingPackageMenuComboRepository packageMenuComboRepository;
     private final WeddingPackageServiceItemRepository packageServiceItemRepository;
     private final WeddingPackageBeverageAllowanceRepository packageBeverageAllowanceRepository;
     private final WeddingPackageBenefitRepository packageBenefitRepository;
+
     private final DishRepository dishRepository;
     private final DishComboRepository dishComboRepository;
     private final DishComboSlotRepository dishComboSlotRepository;
     private final BeverageRepository beverageRepository;
     private final ServiceRepository serviceRepository;
+
     private final AuditLogRepository auditLogRepository;
     private final BookingDocumentService bookingDocumentService;
     private final BookingPaymentReader bookingPaymentReader;
@@ -75,6 +80,7 @@ public class BookingServiceImpl implements BookingService {
             BookingRepository bookingRepository,
             BookingLineSnapshotRepository lineRepository,
             BookingPackageSnapshotRepository packageSnapshotRepository,
+            BookingMenuComboSnapshotRepository menuComboSnapshotRepository,
             BookingHallHoldRepository holdRepository,
             HallRepository hallRepository,
             HallPricingRepository hallPricingRepository,
@@ -96,6 +102,7 @@ public class BookingServiceImpl implements BookingService {
         this.bookingRepository = bookingRepository;
         this.lineRepository = lineRepository;
         this.packageSnapshotRepository = packageSnapshotRepository;
+        this.menuComboSnapshotRepository = menuComboSnapshotRepository;
         this.holdRepository = holdRepository;
         this.hallRepository = hallRepository;
         this.hallPricingRepository = hallPricingRepository;
@@ -118,7 +125,6 @@ public class BookingServiceImpl implements BookingService {
     @Override
     @Transactional(readOnly = true)
     public List<HallAvailabilityResponse> checkHallAvailability(LocalDate bookingDate, UUID shiftId, Integer capacity) {
-        // BR-CHA-1 / BR-CHA-2 / BR-CHA-3 / BR-CHA-4
         if (bookingDate == null || shiftId == null || capacity == null || capacity <= 0) {
             throw new BadRequestException("MSG2: Ngày, ca và số bàn không được để trống");
         }
@@ -127,9 +133,21 @@ public class BookingServiceImpl implements BookingService {
                 .orElseThrow(() -> new ResourceNotFoundException("Ca không tồn tại"));
 
         Instant bookingInstant = toStartOfDay(bookingDate);
-        List<BookingStatus> blockingStatuses = List.of(BookingStatus.CONFIRMED, BookingStatus.ONGOING, BookingStatus.PENDING);
-        List<Booking> booked = bookingRepository.findByBookingDateAndShiftAndStatuses(bookingInstant, shiftId, blockingStatuses);
-        Set<UUID> bookedHallIds = booked.stream().map(b -> b.getHall().getId()).collect(Collectors.toSet());
+        List<BookingStatus> blockingStatuses = List.of(
+                BookingStatus.CONFIRMED,
+                BookingStatus.ONGOING,
+                BookingStatus.PENDING
+        );
+
+        List<Booking> booked = bookingRepository.findByBookingDateAndShiftAndStatuses(
+                bookingInstant,
+                shiftId,
+                blockingStatuses
+        );
+
+        Set<UUID> bookedHallIds = booked.stream()
+                .map(b -> b.getHall().getId())
+                .collect(Collectors.toSet());
 
         return hallRepository.findAllActive().stream()
                 .filter(h -> h.getStatus() == HallStatus.ACTIVE)
@@ -151,7 +169,6 @@ public class BookingServiceImpl implements BookingService {
 
     @Override
     public BookingResponse createBooking(BookingRequest request, String currentUserId) {
-        // BR-CBK-10: ValidateWeddingInput + ValidateTableInput
         validateBookingInput(request, true);
 
         Hall hall = loadActiveHall(request.getHallId());
@@ -160,24 +177,37 @@ public class BookingServiceImpl implements BookingService {
 
         validateTableInput(request.getNumberOfTables(), request.getNumberOfReserveTables(), hall);
 
-        // BR-CBK-11: Hall availability recheck + hold validation
         ensureHallSlotAvailable(hall.getId(), bookingInstant, shift.getId(), null);
         validateOrCreateHold(hall, shift, bookingInstant, currentUserId);
 
         WeddingPackage weddingPackage = null;
         DishCombo selectedMenuCombo = null;
+
         if (request.getBookingMode() == BookingMode.PACKAGE) {
             weddingPackage = loadActiveWeddingPackage(request.getPackageId());
             selectedMenuCombo = resolveSelectedMenuCombo(weddingPackage, request.getSelectedMenuComboId());
         }
 
         double hallPrice = calculateHallPrice(hall, shift, request.getBookingDate());
-        List<BookingLineRequest> draftLines = initializeDraftLines(request, weddingPackage, selectedMenuCombo, hall, hallPrice);
-        AmountSummary amountSummary = recalculateAmount(draftLines);
-        double deposit = request.getDepositAmount() == null ? round(amountSummary.bookingAmount * DEFAULT_DEPOSIT_RATE) : request.getDepositAmount();
-        if (deposit <= 0) throw new BadRequestException("MSG2: Tiền đặt cọc phải lớn hơn 0");
 
-        // BR-CBK-12: CreateBooking(...)
+        List<BookingLineRequest> draftLines = initializeDraftLines(
+                request,
+                weddingPackage,
+                selectedMenuCombo,
+                hall,
+                hallPrice
+        );
+
+        AmountSummary amountSummary = recalculateAmount(draftLines);
+
+        double deposit = request.getDepositAmount() == null
+                ? round(amountSummary.bookingAmount * DEFAULT_DEPOSIT_RATE)
+                : request.getDepositAmount();
+
+        if (deposit <= 0) {
+            throw new BadRequestException("MSG2: Tiền đặt cọc phải lớn hơn 0");
+        }
+
         Booking booking = Booking.builder()
                 .bookingDate(bookingInstant)
                 .shift(shift)
@@ -191,11 +221,7 @@ public class BookingServiceImpl implements BookingService {
                 .numberOfTables(request.getNumberOfTables())
                 .numberOfReserveTables(request.getNumberOfReserveTables())
                 .bookingMode(request.getBookingMode())
-                .manualMenuMode(
-                        request.getBookingMode() == BookingMode.MANUAL
-                                ? request.getManualMenuMode()
-                                : null
-                )
+                .manualMenuMode(request.getBookingMode() == BookingMode.MANUAL ? request.getManualMenuMode() : null)
                 .weddingPackage(weddingPackage)
                 .selectedMenuCombo(selectedMenuCombo)
                 .hallPrice(hallPrice)
@@ -204,7 +230,7 @@ public class BookingServiceImpl implements BookingService {
                 .bookingAmount(amountSummary.bookingAmount)
                 .depositAmount(deposit)
                 .confirmedPaymentAmount(0.0)
-                .remainingAmount(round(amountSummary.bookingAmount - 0.0))
+                .remainingAmount(round(amountSummary.bookingAmount))
                 .note(request.getNote())
                 .status(BookingStatus.PENDING)
                 .createdBy(currentUserId)
@@ -213,20 +239,17 @@ public class BookingServiceImpl implements BookingService {
                 .build();
 
         Booking savedBooking = bookingRepository.save(booking);
+
         saveLineSnapshots(savedBooking, draftLines, currentUserId);
         savePackageSnapshot(savedBooking, weddingPackage, selectedMenuCombo, currentUserId);
 
         if (request.getBookingMode() == BookingMode.MANUAL
                 && request.getManualMenuMode() == ManualMenuMode.COMBO) {
-            saveManualComboSnapshots(
-                    savedBooking,
-                    request.getManualComboSelections(),
-                    currentUserId
-            );
+            saveManualComboSnapshots(savedBooking, request.getManualComboSelections(), currentUserId);
         }
+
         convertHold(hall.getId(), shift.getId(), bookingInstant, currentUserId, savedBooking);
 
-        // BR-CBK-13 / BR-CBK-14
         bookingDocumentService.generateConfirmationDocument(savedBooking.getId());
         saveAuditLog(currentUserId, "CREATE_BOOKING", savedBooking.getId(), savedBooking.getCustomerName());
 
@@ -237,12 +260,10 @@ public class BookingServiceImpl implements BookingService {
     public BookingResponse updateBooking(UUID bookingId, BookingRequest request, String currentUserId, long lastModifiedAt) {
         Booking booking = loadExistingBooking(bookingId);
 
-        // BR-UBK-1: only PENDING can be updated
         if (booking.getStatus() != BookingStatus.PENDING) {
             throw new BadRequestException("MSG67: Trạng thái booking không cho phép cập nhật");
         }
 
-        // BR-UBK-8: optimistic locking
         if (booking.getUpdatedAt() != null && booking.getUpdatedAt().toEpochMilli() != lastModifiedAt) {
             throw new BadRequestException("MSG62: Dữ liệu đã được sửa đổi bởi người khác. Vui lòng tải lại trang.");
         }
@@ -252,13 +273,13 @@ public class BookingServiceImpl implements BookingService {
         Hall newHall = loadActiveHall(request.getHallId());
         Shift newShift = loadActiveShift(request.getShiftId());
         Instant newBookingDate = toStartOfDay(request.getBookingDate());
+
         validateTableInput(request.getNumberOfTables(), request.getNumberOfReserveTables(), newHall);
 
         boolean slotChanged = !booking.getHall().getId().equals(newHall.getId())
                 || !booking.getShift().getId().equals(newShift.getId())
                 || !booking.getBookingDate().equals(newBookingDate);
 
-        // BR-UBK-2 / BR-UBK-9: slot change and availability recheck
         if (slotChanged) {
             ensureHallSlotAvailable(newHall.getId(), newBookingDate, newShift.getId(), bookingId);
             validateOrCreateHold(newHall, newShift, newBookingDate, currentUserId);
@@ -266,27 +287,43 @@ public class BookingServiceImpl implements BookingService {
 
         WeddingPackage newPackage = null;
         DishCombo newSelectedCombo = null;
+
         if (request.getBookingMode() == BookingMode.PACKAGE) {
             newPackage = loadActiveWeddingPackage(request.getPackageId());
             newSelectedCombo = resolveSelectedMenuCombo(newPackage, request.getSelectedMenuComboId());
         }
 
-        boolean packageChanged = detectPackageChange(booking, request.getBookingMode(), newPackage, newSelectedCombo);
+        boolean packageChanged = detectPackageChange(
+                booking,
+                request.getBookingMode(),
+                newPackage,
+                newSelectedCombo
+        );
+
+        double newHallPrice = calculateHallPrice(newHall, newShift, request.getBookingDate());
+
         List<BookingLineRequest> draftLines;
-        if (packageChanged) {
-            draftLines = initializeDraftLines(request, newPackage, newSelectedCombo, newHall, calculateHallPrice(newHall, newShift, request.getBookingDate()));
+
+        if (packageChanged || request.getBookingMode() == BookingMode.MANUAL) {
+            draftLines = initializeDraftLines(request, newPackage, newSelectedCombo, newHall, newHallPrice);
         } else {
             draftLines = request.getBookingDraftLines() == null || request.getBookingDraftLines().isEmpty()
-                    ? lineRepository.findByBookingId(bookingId).stream().map(this::toLineRequest).collect(Collectors.toList())
-                    : initializeDraftLines(request, newPackage, newSelectedCombo, newHall, calculateHallPrice(newHall, newShift, request.getBookingDate()));
+                    ? lineRepository.findByBookingId(bookingId)
+                    .stream()
+                    .map(this::toLineRequest)
+                    .collect(Collectors.toList())
+                    : initializeDraftLines(request, newPackage, newSelectedCombo, newHall, newHallPrice);
         }
 
         AmountSummary amountSummary = recalculateAmount(draftLines);
         double confirmedPaid = bookingPaymentReader.getConfirmedPaymentAmountByBooking(bookingId);
-        double deposit = confirmedPaid > 0 ? booking.getDepositAmount()
-                : (request.getDepositAmount() == null ? round(amountSummary.bookingAmount * DEFAULT_DEPOSIT_RATE) : request.getDepositAmount());
 
-        // BR-UBK-10: UpdateBooking(...)
+        double deposit = confirmedPaid > 0
+                ? booking.getDepositAmount()
+                : request.getDepositAmount() == null
+                ? round(amountSummary.bookingAmount * DEFAULT_DEPOSIT_RATE)
+                : request.getDepositAmount();
+
         booking.setBookingDate(newBookingDate);
         booking.setShift(newShift);
         booking.setHall(newHall);
@@ -299,14 +336,10 @@ public class BookingServiceImpl implements BookingService {
         booking.setNumberOfTables(request.getNumberOfTables());
         booking.setNumberOfReserveTables(request.getNumberOfReserveTables());
         booking.setBookingMode(request.getBookingMode());
-        booking.setManualMenuMode(
-                request.getBookingMode() == BookingMode.MANUAL
-                        ? request.getManualMenuMode()
-                        : null
-        );
+        booking.setManualMenuMode(request.getBookingMode() == BookingMode.MANUAL ? request.getManualMenuMode() : null);
         booking.setWeddingPackage(newPackage);
         booking.setSelectedMenuCombo(newSelectedCombo);
-        booking.setHallPrice(calculateHallPrice(newHall, newShift, request.getBookingDate()));
+        booking.setHallPrice(newHallPrice);
         booking.setSubtotalAmount(amountSummary.subtotalAmount);
         booking.setTaxAmount(amountSummary.taxAmount);
         booking.setBookingAmount(amountSummary.bookingAmount);
@@ -321,17 +354,15 @@ public class BookingServiceImpl implements BookingService {
 
         lineRepository.deleteByBookingId(updatedBooking.getId());
         saveLineSnapshots(updatedBooking, draftLines, currentUserId);
+
         packageSnapshotRepository.deleteByBookingId(updatedBooking.getId());
         savePackageSnapshot(updatedBooking, newPackage, newSelectedCombo, currentUserId);
+
         menuComboSnapshotRepository.deleteByBookingId(updatedBooking.getId());
 
         if (request.getBookingMode() == BookingMode.MANUAL
                 && request.getManualMenuMode() == ManualMenuMode.COMBO) {
-            saveManualComboSnapshots(
-                    updatedBooking,
-                    request.getManualComboSelections(),
-                    currentUserId
-            );
+            saveManualComboSnapshots(updatedBooking, request.getManualComboSelections(), currentUserId);
         }
 
         if (slotChanged) {
@@ -351,41 +382,93 @@ public class BookingServiceImpl implements BookingService {
 
         if (criteria.getCustomerName() != null && !criteria.getCustomerName().isBlank()) {
             String kw = criteria.getCustomerName().toLowerCase();
-            bookings = bookings.stream().filter(b -> b.getCustomerName().toLowerCase().contains(kw)).collect(Collectors.toList());
+            bookings = bookings.stream()
+                    .filter(b -> b.getCustomerName().toLowerCase().contains(kw))
+                    .collect(Collectors.toList());
         }
+
         if (criteria.getCustomerPhone() != null && !criteria.getCustomerPhone().isBlank()) {
-            bookings = bookings.stream().filter(b -> b.getCustomerPhone() != null && b.getCustomerPhone().contains(criteria.getCustomerPhone())).collect(Collectors.toList());
+            bookings = bookings.stream()
+                    .filter(b -> b.getCustomerPhone() != null && b.getCustomerPhone().contains(criteria.getCustomerPhone()))
+                    .collect(Collectors.toList());
         }
+
         if (criteria.getCustomerEmail() != null && !criteria.getCustomerEmail().isBlank()) {
             String kw = criteria.getCustomerEmail().toLowerCase();
-            bookings = bookings.stream().filter(b -> b.getCustomerEmail() != null && b.getCustomerEmail().toLowerCase().contains(kw)).collect(Collectors.toList());
+            bookings = bookings.stream()
+                    .filter(b -> b.getCustomerEmail() != null && b.getCustomerEmail().toLowerCase().contains(kw))
+                    .collect(Collectors.toList());
         }
+
         if (criteria.getBrideName() != null && !criteria.getBrideName().isBlank()) {
             String kw = criteria.getBrideName().toLowerCase();
-            bookings = bookings.stream().filter(b -> b.getBrideName().toLowerCase().contains(kw)).collect(Collectors.toList());
+            bookings = bookings.stream()
+                    .filter(b -> b.getBrideName().toLowerCase().contains(kw))
+                    .collect(Collectors.toList());
         }
+
         if (criteria.getGroomName() != null && !criteria.getGroomName().isBlank()) {
             String kw = criteria.getGroomName().toLowerCase();
-            bookings = bookings.stream().filter(b -> b.getGroomName().toLowerCase().contains(kw)).collect(Collectors.toList());
+            bookings = bookings.stream()
+                    .filter(b -> b.getGroomName().toLowerCase().contains(kw))
+                    .collect(Collectors.toList());
         }
-        if (criteria.getBookingDateFrom() != null) bookings = bookings.stream().filter(b -> !b.getBookingDate().isBefore(toStartOfDay(criteria.getBookingDateFrom()))).collect(Collectors.toList());
-        if (criteria.getBookingDateTo() != null) bookings = bookings.stream().filter(b -> !b.getBookingDate().isAfter(toStartOfDay(criteria.getBookingDateTo()))).collect(Collectors.toList());
-        if (criteria.getWeddingDateFrom() != null) bookings = bookings.stream().filter(b -> !b.getWeddingDate().isBefore(toStartOfDay(criteria.getWeddingDateFrom()))).collect(Collectors.toList());
-        if (criteria.getWeddingDateTo() != null) bookings = bookings.stream().filter(b -> !b.getWeddingDate().isAfter(toStartOfDay(criteria.getWeddingDateTo()))).collect(Collectors.toList());
-        if (criteria.getHallId() != null) bookings = bookings.stream().filter(b -> b.getHall().getId().equals(criteria.getHallId())).collect(Collectors.toList());
-        if (criteria.getShiftId() != null) bookings = bookings.stream().filter(b -> b.getShift().getId().equals(criteria.getShiftId())).collect(Collectors.toList());
-        if (criteria.getStatus() != null) bookings = bookings.stream().filter(b -> b.getStatus() == criteria.getStatus()).collect(Collectors.toList());
 
-        return bookings.stream().map(this::mapToBookingResponse).collect(Collectors.toList());
+        if (criteria.getBookingDateFrom() != null) {
+            bookings = bookings.stream()
+                    .filter(b -> !b.getBookingDate().isBefore(toStartOfDay(criteria.getBookingDateFrom())))
+                    .collect(Collectors.toList());
+        }
+
+        if (criteria.getBookingDateTo() != null) {
+            bookings = bookings.stream()
+                    .filter(b -> !b.getBookingDate().isAfter(toStartOfDay(criteria.getBookingDateTo())))
+                    .collect(Collectors.toList());
+        }
+
+        if (criteria.getWeddingDateFrom() != null) {
+            bookings = bookings.stream()
+                    .filter(b -> !b.getWeddingDate().isBefore(toStartOfDay(criteria.getWeddingDateFrom())))
+                    .collect(Collectors.toList());
+        }
+
+        if (criteria.getWeddingDateTo() != null) {
+            bookings = bookings.stream()
+                    .filter(b -> !b.getWeddingDate().isAfter(toStartOfDay(criteria.getWeddingDateTo())))
+                    .collect(Collectors.toList());
+        }
+
+        if (criteria.getHallId() != null) {
+            bookings = bookings.stream()
+                    .filter(b -> b.getHall().getId().equals(criteria.getHallId()))
+                    .collect(Collectors.toList());
+        }
+
+        if (criteria.getShiftId() != null) {
+            bookings = bookings.stream()
+                    .filter(b -> b.getShift().getId().equals(criteria.getShiftId()))
+                    .collect(Collectors.toList());
+        }
+
+        if (criteria.getStatus() != null) {
+            bookings = bookings.stream()
+                    .filter(b -> b.getStatus() == criteria.getStatus())
+                    .collect(Collectors.toList());
+        }
+
+        return bookings.stream()
+                .map(this::mapToBookingResponse)
+                .collect(Collectors.toList());
     }
 
     @Override
     public CancelBookingResponse cancelBooking(UUID bookingId, String reason, String currentUserId) {
-        // BR-CAB-3
-        if (reason == null || reason.isBlank()) throw new BadRequestException("MSG2: Lý do hủy không được để trống");
+        if (reason == null || reason.isBlank()) {
+            throw new BadRequestException("MSG2: Lý do hủy không được để trống");
+        }
 
         Booking booking = loadExistingBooking(bookingId);
-        // BR-CAB-4
+
         if (booking.getStatus() != BookingStatus.PENDING && booking.getStatus() != BookingStatus.CONFIRMED) {
             throw new BadRequestException("MSG67: Trạng thái booking không cho phép hủy");
         }
@@ -395,13 +478,13 @@ public class BookingServiceImpl implements BookingService {
         double refundable = bookingPaymentReader.getRefundableAmount(bookingId, daysBeforeWedding);
         double nonRefundable = round(totalPaid - refundable);
 
-        // BR-CAB-5 / BR-CAB-6 / BR-CAB-7
         booking.setStatus(BookingStatus.CANCELLED);
         booking.setCancelReason(reason);
         booking.setCancelledBy(currentUserId);
         booking.setCancelledAt(Instant.now());
         booking.setUpdatedBy(currentUserId);
         booking.setUpdatedAt(Instant.now());
+
         bookingRepository.save(booking);
 
         bookingDocumentService.generateCancellationDocument(bookingId);
@@ -419,24 +502,57 @@ public class BookingServiceImpl implements BookingService {
 
     @Override
     public BookingResponse updateDishLines(UUID bookingId, EditBookingLinesRequest request, String currentUserId) {
-        return replaceItemLines(bookingId, request, currentUserId, BookingLineItemType.DISH, "UPDATE_BOOKING_DISH_LINES");
+        return replaceItemLines(
+                bookingId,
+                request,
+                currentUserId,
+                BookingLineItemType.DISH,
+                "UPDATE_BOOKING_DISH_LINES"
+        );
     }
 
     @Override
     public BookingResponse updateServiceLines(UUID bookingId, EditBookingLinesRequest request, String currentUserId) {
-        return replaceItemLines(bookingId, request, currentUserId, BookingLineItemType.SERVICE, "UPDATE_BOOKING_SERVICE_LINES");
+        return replaceItemLines(
+                bookingId,
+                request,
+                currentUserId,
+                BookingLineItemType.SERVICE,
+                "UPDATE_BOOKING_SERVICE_LINES"
+        );
     }
 
     @Override
     public BookingResponse updateBeverageLines(UUID bookingId, EditBookingLinesRequest request, String currentUserId) {
-        return replaceItemLines(bookingId, request, currentUserId, BookingLineItemType.BEVERAGE, "UPDATE_BOOKING_BEVERAGE_LINES");
+        return replaceItemLines(
+                bookingId,
+                request,
+                currentUserId,
+                BookingLineItemType.BEVERAGE,
+                "UPDATE_BOOKING_BEVERAGE_LINES"
+        );
     }
 
-    private BookingResponse replaceItemLines(UUID bookingId, EditBookingLinesRequest request, String currentUserId, BookingLineItemType itemType, String action) {
+    private BookingResponse replaceItemLines(
+            UUID bookingId,
+            EditBookingLinesRequest request,
+            String currentUserId,
+            BookingLineItemType itemType,
+            String action
+    ) {
         Booking booking = loadExistingBooking(bookingId);
         ensureBookingEditableForLineEdit(booking);
 
-        if (request.getLines() == null) throw new BadRequestException("MSG2: Danh sách dòng không được để trống");
+        if (request.getLines() == null) {
+            throw new BadRequestException("MSG2: Danh sách dòng không được để trống");
+        }
+
+        if (booking.getBookingMode() == BookingMode.MANUAL
+                && booking.getManualMenuMode() == ManualMenuMode.COMBO
+                && itemType == BookingLineItemType.DISH) {
+            throw new BadRequestException("MSG2: Booking manual combo không được sửa danh sách món trực tiếp. Hãy sửa combo món ăn.");
+        }
+
         List<BookingLineRequest> normalized = request.getLines().stream()
                 .peek(l -> l.setItemType(itemType))
                 .map(this::normalizeLine)
@@ -444,11 +560,11 @@ public class BookingServiceImpl implements BookingService {
 
         validateLineList(normalized, itemType);
 
-        // Preserve non-target lines, replace target item lines, then recalculate all.
         List<BookingLineRequest> allLines = lineRepository.findByBookingId(bookingId).stream()
                 .filter(l -> l.getItemType() != itemType)
                 .map(this::toLineRequest)
                 .collect(Collectors.toList());
+
         allLines.addAll(normalized);
         reassignDisplayOrder(allLines);
 
@@ -465,16 +581,20 @@ public class BookingServiceImpl implements BookingService {
         booking.setRemainingAmount(round(amountSummary.bookingAmount - confirmedPaid));
         booking.setUpdatedBy(currentUserId);
         booking.setUpdatedAt(Instant.now());
+
         bookingRepository.save(booking);
 
         saveAuditLog(currentUserId, action, bookingId, booking.getCustomerName());
+
         return mapToBookingResponse(booking);
     }
 
     @Override
     @Transactional(readOnly = true)
     public List<BookingResponse> getAllBookings() {
-        return bookingRepository.findAllActive().stream().map(this::mapToBookingResponse).collect(Collectors.toList());
+        return bookingRepository.findAllActive().stream()
+                .map(this::mapToBookingResponse)
+                .collect(Collectors.toList());
     }
 
     @Override
@@ -522,8 +642,11 @@ public class BookingServiceImpl implements BookingService {
             throw new BadRequestException("MSG2: Chế độ đặt tiệc không được để trống");
         }
 
-        if (request.getBookingMode() == BookingMode.PACKAGE && request.getPackageId() == null) {
-            throw new BadRequestException("MSG2: Gói tiệc không được để trống");
+        if (request.getBookingMode() == BookingMode.PACKAGE) {
+            if (request.getPackageId() == null) {
+                throw new BadRequestException("MSG2: Gói tiệc không được để trống");
+            }
+            return;
         }
 
         if (request.getBookingMode() == BookingMode.MANUAL) {
@@ -536,8 +659,7 @@ public class BookingServiceImpl implements BookingService {
                     throw new BadRequestException("MSG2: Danh sách combo món ăn không được để trống");
                 }
 
-                int totalComboTables = request.getManualComboSelections()
-                        .stream()
+                int totalComboTables = request.getManualComboSelections().stream()
                         .mapToInt(combo -> combo.getTableCount() == null ? 0 : combo.getTableCount())
                         .sum();
 
@@ -548,8 +670,7 @@ public class BookingServiceImpl implements BookingService {
 
             if (request.getManualMenuMode() == ManualMenuMode.CUSTOM) {
                 boolean hasDishLine = request.getBookingDraftLines() != null
-                        && request.getBookingDraftLines()
-                        .stream()
+                        && request.getBookingDraftLines().stream()
                         .anyMatch(line -> line.getItemType() == BookingLineItemType.DISH);
 
                 if (!hasDishLine) {
@@ -560,23 +681,61 @@ public class BookingServiceImpl implements BookingService {
     }
 
     private void validateTableInput(Integer tables, Integer reserveTables, Hall hall) {
-        if (tables == null || tables < hall.getMinTables()) throw new BadRequestException("MSG59: Số bàn phải lớn hơn hoặc bằng số bàn tối thiểu");
-        if (tables > hall.getMaxTables()) throw new BadRequestException("MSG66: Số bàn không được vượt quá số bàn tối đa");
-        if (reserveTables == null || reserveTables < 0) throw new BadRequestException("MSG24: Số bàn dự phòng phải lớn hơn hoặc bằng 0");
-        if (tables + reserveTables > hall.getMaxTables()) throw new BadRequestException("MSG59: Tổng số bàn và bàn dự phòng không được vượt quá sức chứa sảnh");
+        if (tables == null || tables < hall.getMinTables()) {
+            throw new BadRequestException("MSG59: Số bàn phải lớn hơn hoặc bằng số bàn tối thiểu");
+        }
+
+        if (tables > hall.getMaxTables()) {
+            throw new BadRequestException("MSG66: Số bàn không được vượt quá số bàn tối đa");
+        }
+
+        if (reserveTables == null || reserveTables < 0) {
+            throw new BadRequestException("MSG24: Số bàn dự phòng phải lớn hơn hoặc bằng 0");
+        }
+
+        if (tables + reserveTables > hall.getMaxTables()) {
+            throw new BadRequestException("MSG59: Tổng số bàn và bàn dự phòng không được vượt quá sức chứa sảnh");
+        }
     }
 
     private void ensureHallSlotAvailable(UUID hallId, Instant bookingDate, UUID shiftId, UUID excludeBookingId) {
-        List<BookingStatus> blockingStatuses = List.of(BookingStatus.PENDING, BookingStatus.CONFIRMED, BookingStatus.ONGOING);
-        long conflict = bookingRepository.countSlotConflict(hallId, bookingDate, shiftId, blockingStatuses, excludeBookingId);
-        if (conflict > 0) throw new BadRequestException("MSG35: Sảnh đã được đặt hoặc đang được giữ");
+        List<BookingStatus> blockingStatuses = List.of(
+                BookingStatus.PENDING,
+                BookingStatus.CONFIRMED,
+                BookingStatus.ONGOING
+        );
+
+        long conflict = bookingRepository.countSlotConflict(
+                hallId,
+                bookingDate,
+                shiftId,
+                blockingStatuses,
+                excludeBookingId
+        );
+
+        if (conflict > 0) {
+            throw new BadRequestException("MSG35: Sảnh đã được đặt hoặc đang được giữ");
+        }
     }
 
     private void validateOrCreateHold(Hall hall, Shift shift, Instant bookingDate, String currentUserId) {
         Instant now = Instant.now();
-        List<BookingHallHold> holds = holdRepository.findActiveHoldForSlot(hall.getId(), shift.getId(), bookingDate, BookingHoldStatus.TEMPORARY, now);
-        boolean heldByCurrentUser = holds.stream().anyMatch(h -> h.getHeldBy().equals(currentUserId));
-        if (!holds.isEmpty() && !heldByCurrentUser) throw new BadRequestException("MSG35: Sảnh đang được giữ bởi người khác");
+
+        List<BookingHallHold> holds = holdRepository.findActiveHoldForSlot(
+                hall.getId(),
+                shift.getId(),
+                bookingDate,
+                BookingHoldStatus.TEMPORARY,
+                now
+        );
+
+        boolean heldByCurrentUser = holds.stream()
+                .anyMatch(h -> h.getHeldBy().equals(currentUserId));
+
+        if (!holds.isEmpty() && !heldByCurrentUser) {
+            throw new BadRequestException("MSG35: Sảnh đang được giữ bởi người khác");
+        }
+
         if (holds.isEmpty()) {
             BookingHallHold hold = BookingHallHold.builder()
                     .hall(hall)
@@ -589,12 +748,20 @@ public class BookingServiceImpl implements BookingService {
                     .createdAt(now)
                     .isDeleted(false)
                     .build();
+
             holdRepository.save(hold);
         }
     }
 
     private void convertHold(UUID hallId, UUID shiftId, Instant bookingDate, String currentUserId, Booking booking) {
-        holdRepository.findValidHoldByUser(hallId, shiftId, bookingDate, currentUserId, BookingHoldStatus.TEMPORARY, Instant.now())
+        holdRepository.findValidHoldByUser(
+                        hallId,
+                        shiftId,
+                        bookingDate,
+                        currentUserId,
+                        BookingHoldStatus.TEMPORARY,
+                        Instant.now()
+                )
                 .ifPresent(h -> {
                     h.setStatus(BookingHoldStatus.CONVERTED);
                     h.setBooking(booking);
@@ -715,6 +882,7 @@ public class BookingServiceImpl implements BookingService {
         reassignDisplayOrder(lines);
         return lines;
     }
+
     private List<BookingLineRequest> buildComboDishLines(
             DishCombo combo,
             Integer tableCount,
@@ -772,9 +940,8 @@ public class BookingServiceImpl implements BookingService {
 
         return lines;
     }
-    private List<BookingLineRequest> buildManualComboDishLines(
-            List<BookingMenuComboRequest> comboRequests
-    ) {
+
+    private List<BookingLineRequest> buildManualComboDishLines(List<BookingMenuComboRequest> comboRequests) {
         if (comboRequests == null || comboRequests.isEmpty()) {
             return List.of();
         }
@@ -789,15 +956,7 @@ public class BookingServiceImpl implements BookingService {
                 throw new BadRequestException("MSG2: Combo món ăn không hoạt động");
             }
 
-            Map<UUID, UUID> replacementMap = comboRequest.getSlotReplacements() == null
-                    ? Map.of()
-                    : comboRequest.getSlotReplacements()
-                    .stream()
-                    .collect(Collectors.toMap(
-                            BookingMenuComboSlotReplacementRequest::getSlotId,
-                            BookingMenuComboSlotReplacementRequest::getDishId,
-                            (oldValue, newValue) -> newValue
-                    ));
+            Map<UUID, UUID> replacementMap = buildReplacementMap(comboRequest);
 
             lines.addAll(buildComboDishLines(
                     combo,
@@ -814,109 +973,6 @@ public class BookingServiceImpl implements BookingService {
         return lines;
     }
 
-    private BookingLineRequest normalizeLine(BookingLineRequest input) {
-        if (input.getItemType() == null) throw new BadRequestException("MSG2: Loại dòng không được để trống");
-        if (input.getQuantity() == null || input.getQuantity() <= 0) throw new BadRequestException("MSG2: Số lượng phải lớn hơn 0");
-
-        if (input.getItemType() == BookingLineItemType.DISH && input.getItemId() != null) {
-            Dish dish = dishRepository.findByIdAndIsDeletedFalse(input.getItemId()).orElseThrow(() -> new ResourceNotFoundException("Món ăn không tồn tại"));
-            if (dish.getStatus() != DishStatus.ACTIVE) throw new BadRequestException("MSG2: Món ăn không hoạt động");
-            input.setItemName(dish.getName());
-            input.setUnitPrice(input.getUnitPrice() == null ? dish.getUnitPrice() : input.getUnitPrice());
-        }
-        if (input.getItemType() == BookingLineItemType.SERVICE && input.getItemId() != null) {
-            com.wedding.management.domain.service.model.Service service = serviceRepository.findByIdAndIsDeletedFalse(input.getItemId()).orElseThrow(() -> new ResourceNotFoundException("Dịch vụ không tồn tại"));
-            if (service.getStatus() != ServiceStatus.ACTIVE) throw new BadRequestException("MSG2: Dịch vụ không hoạt động");
-            input.setItemName(service.getName());
-            input.setUnitPrice(input.getUnitPrice() == null ? service.getPrice() : input.getUnitPrice());
-        }
-        if (input.getItemType() == BookingLineItemType.BEVERAGE && input.getItemId() != null) {
-            Beverage beverage = beverageRepository.findByIdAndIsDeletedFalse(input.getItemId()).orElseThrow(() -> new ResourceNotFoundException("Đồ uống không tồn tại"));
-            if (beverage.getStatus() != BeverageStatus.ACTIVE) throw new BadRequestException("MSG2: Đồ uống không hoạt động");
-            input.setItemName(beverage.getName());
-            input.setUnitPrice(input.getUnitPrice() == null ? beverage.getUnitPrice() : input.getUnitPrice());
-        }
-
-        if (isBlank(input.getItemName())) throw new BadRequestException("MSG2: Tên dòng không được để trống");
-        if (input.getUnitPrice() == null || input.getUnitPrice() < 0) input.setUnitPrice(0.0);
-        if (input.getDiscountAmount() == null || input.getDiscountAmount() < 0) input.setDiscountAmount(0.0);
-        if (input.getTaxRate() == null || input.getTaxRate() < 0) input.setTaxRate(DEFAULT_TAX_RATE);
-        if (input.getSourceType() == null) input.setSourceType(BookingLineSourceType.MANUAL_EXTRA);
-        if (input.getEditable() == null) input.setEditable(true);
-        if (input.getRemovable() == null) input.setRemovable(true);
-        return input;
-    }
-
-    private void validateLineList(List<BookingLineRequest> lines, BookingLineItemType expectedType) {
-        for (BookingLineRequest line : lines) {
-            if (line.getItemType() != expectedType) throw new BadRequestException("MSG2: Danh sách dòng không hợp lệ");
-            if (line.getQuantity() == null || line.getQuantity() <= 0) throw new BadRequestException("MSG2: Số lượng phải lớn hơn 0");
-            if (line.getUnitPrice() == null || line.getUnitPrice() < 0) throw new BadRequestException("MSG13: Giá phải lớn hơn hoặc bằng 0");
-        }
-    }
-
-    private AmountSummary recalculateAmount(List<BookingLineRequest> lines) {
-        double subtotal = 0.0;
-        double tax = 0.0;
-        for (BookingLineRequest line : lines) {
-            line = normalizeLine(line);
-            double gross = (line.getUnitPrice() * line.getQuantity()) - line.getDiscountAmount();
-            gross = Math.max(gross, 0.0);
-            double lineTax = gross * line.getTaxRate();
-            subtotal += gross;
-            tax += lineTax;
-        }
-        return new AmountSummary(round(subtotal), round(tax), round(subtotal + tax));
-    }
-
-    private void saveLineSnapshots(Booking booking, List<BookingLineRequest> lines, String currentUserId) {
-        int order = 1;
-        for (BookingLineRequest request : lines) {
-            request = normalizeLine(request);
-            double gross = Math.max((request.getUnitPrice() * request.getQuantity()) - request.getDiscountAmount(), 0.0);
-            double lineTax = round(gross * request.getTaxRate());
-            BookingLineSnapshot snapshot = BookingLineSnapshot.builder()
-                    .booking(booking)
-                    .itemType(request.getItemType())
-                    .itemId(request.getItemId())
-                    .itemName(request.getItemName())
-                    .quantity(request.getQuantity())
-                    .unitPrice(request.getUnitPrice())
-                    .discountAmount(request.getDiscountAmount())
-                    .taxRate(request.getTaxRate())
-                    .taxAmount(lineTax)
-                    .lineAmount(round(gross + lineTax))
-                    .sourceType(request.getSourceType())
-                    .sourceId(request.getSourceId())
-                    .sourceName(request.getSourceName())
-                    .editable(request.getEditable())
-                    .removable(request.getRemovable())
-                    .displayOrder(request.getDisplayOrder() == null ? order : request.getDisplayOrder())
-                    .createdBy(currentUserId)
-                    .createdAt(Instant.now())
-                    .isDeleted(false)
-                    .build();
-            lineRepository.save(snapshot);
-            order++;
-        }
-    }
-
-    private void savePackageSnapshot(Booking booking, WeddingPackage weddingPackage, DishCombo selectedMenuCombo, String currentUserId) {
-        if (weddingPackage == null) return;
-        BookingPackageSnapshot snapshot = BookingPackageSnapshot.builder()
-                .booking(booking)
-                .packageId(weddingPackage.getId())
-                .packageName(weddingPackage.getName())
-                .packageDescription(weddingPackage.getDescription())
-                .packagePolicySnapshot(buildPackagePolicySnapshot(weddingPackage))
-                .selectedMenuComboId(selectedMenuCombo == null ? null : selectedMenuCombo.getId())
-                .selectedMenuComboName(selectedMenuCombo == null ? null : selectedMenuCombo.getName())
-                .createdBy(currentUserId)
-                .createdAt(Instant.now())
-                .isDeleted(false)
-                .build();
-        packageSnapshotRepository.save(snapshot);
-    }
     private void saveManualComboSnapshots(
             Booking booking,
             List<BookingMenuComboRequest> comboRequests,
@@ -937,17 +993,7 @@ public class BookingServiceImpl implements BookingService {
             }
 
             double discountRate = combo.getComboDiscountRate() == null ? 0.0 : combo.getComboDiscountRate();
-
-            Map<UUID, UUID> replacementMap = comboRequest.getSlotReplacements() == null
-                    ? Map.of()
-                    : comboRequest.getSlotReplacements()
-                    .stream()
-                    .collect(Collectors.toMap(
-                            BookingMenuComboSlotReplacementRequest::getSlotId,
-                            BookingMenuComboSlotReplacementRequest::getDishId,
-                            (oldValue, newValue) -> newValue
-                    ));
-
+            Map<UUID, UUID> replacementMap = buildReplacementMap(comboRequest);
             List<DishComboSlot> slots = dishComboSlotRepository.findByComboId(combo.getId());
 
             double originalComboPrice = 0.0;
@@ -959,16 +1005,7 @@ public class BookingServiceImpl implements BookingService {
                     continue;
                 }
 
-                UUID selectedDishId = replacementMap.getOrDefault(slot.getId(), defaultDish.getId());
-
-                Dish selectedDish = dishRepository.findByIdAndIsDeletedFalse(selectedDishId)
-                        .orElseThrow(() -> new ResourceNotFoundException("Món ăn không tồn tại"));
-
-                if (selectedDish.getStatus() != DishStatus.ACTIVE) {
-                    throw new BadRequestException("MSG2: Món ăn không hoạt động");
-                }
-
-                originalComboPrice += selectedDish.getUnitPrice() == null ? 0.0 : selectedDish.getUnitPrice();
+                originalComboPrice += defaultDish.getUnitPrice() == null ? 0.0 : defaultDish.getUnitPrice();
             }
 
             double discountedComboPrice = originalComboPrice * (1 - discountRate / 100.0);
@@ -982,13 +1019,11 @@ public class BookingServiceImpl implements BookingService {
                     .discountRate(discountRate)
                     .discountedComboPrice(round(discountedComboPrice))
                     .displayOrder(comboOrder++)
+                    .slotSnapshots(new ArrayList<>())
                     .createdBy(currentUserId)
                     .createdAt(Instant.now())
                     .isDeleted(false)
                     .build();
-
-            BookingMenuComboSnapshot savedComboSnapshot =
-                    menuComboSnapshotRepository.save(comboSnapshot);
 
             int slotOrder = 1;
 
@@ -1011,7 +1046,7 @@ public class BookingServiceImpl implements BookingService {
                 boolean replaced = !selectedDish.getId().equals(defaultDish.getId());
 
                 BookingMenuComboSlotSnapshot slotSnapshot = BookingMenuComboSlotSnapshot.builder()
-                        .comboSnapshot(savedComboSnapshot)
+                        .comboSnapshot(comboSnapshot)
                         .slotId(slot.getId())
                         .slotName(resolveSlotName(slot, slotOrder))
                         .originalDishId(defaultDish.getId())
@@ -1027,19 +1062,241 @@ public class BookingServiceImpl implements BookingService {
                         .isDeleted(false)
                         .build();
 
-                menuComboSlotSnapshotRepository.save(slotSnapshot);
+                comboSnapshot.getSlotSnapshots().add(slotSnapshot);
+            }
+
+            menuComboSnapshotRepository.save(comboSnapshot);
+        }
+    }
+
+    private Map<UUID, UUID> buildReplacementMap(BookingMenuComboRequest comboRequest) {
+        if (comboRequest.getSlotReplacements() == null || comboRequest.getSlotReplacements().isEmpty()) {
+            return Map.of();
+        }
+
+        return comboRequest.getSlotReplacements().stream()
+                .collect(Collectors.toMap(
+                        BookingMenuComboSlotReplacementRequest::getSlotId,
+                        BookingMenuComboSlotReplacementRequest::getDishId,
+                        (oldValue, newValue) -> newValue
+                ));
+    }
+
+    private BookingLineRequest normalizeLine(BookingLineRequest input) {
+        if (input.getItemType() == null) {
+            throw new BadRequestException("MSG2: Loại dòng không được để trống");
+        }
+
+        if (input.getQuantity() == null || input.getQuantity() <= 0) {
+            throw new BadRequestException("MSG2: Số lượng phải lớn hơn 0");
+        }
+
+        if (input.getItemType() == BookingLineItemType.DISH && input.getItemId() != null) {
+            Dish dish = dishRepository.findByIdAndIsDeletedFalse(input.getItemId())
+                    .orElseThrow(() -> new ResourceNotFoundException("Món ăn không tồn tại"));
+
+            if (dish.getStatus() != DishStatus.ACTIVE) {
+                throw new BadRequestException("MSG2: Món ăn không hoạt động");
+            }
+
+            input.setItemName(dish.getName());
+            input.setUnitPrice(input.getUnitPrice() == null ? dish.getUnitPrice() : input.getUnitPrice());
+        }
+
+        if (input.getItemType() == BookingLineItemType.SERVICE && input.getItemId() != null) {
+            com.wedding.management.domain.service.model.Service service =
+                    serviceRepository.findByIdAndIsDeletedFalse(input.getItemId())
+                            .orElseThrow(() -> new ResourceNotFoundException("Dịch vụ không tồn tại"));
+
+            if (service.getStatus() != ServiceStatus.ACTIVE) {
+                throw new BadRequestException("MSG2: Dịch vụ không hoạt động");
+            }
+
+            input.setItemName(service.getName());
+            input.setUnitPrice(input.getUnitPrice() == null ? service.getPrice() : input.getUnitPrice());
+        }
+
+        if (input.getItemType() == BookingLineItemType.BEVERAGE && input.getItemId() != null) {
+            Beverage beverage = beverageRepository.findByIdAndIsDeletedFalse(input.getItemId())
+                    .orElseThrow(() -> new ResourceNotFoundException("Đồ uống không tồn tại"));
+
+            if (beverage.getStatus() != BeverageStatus.ACTIVE) {
+                throw new BadRequestException("MSG2: Đồ uống không hoạt động");
+            }
+
+            input.setItemName(beverage.getName());
+            input.setUnitPrice(input.getUnitPrice() == null ? beverage.getUnitPrice() : input.getUnitPrice());
+        }
+
+        if (isBlank(input.getItemName())) {
+            throw new BadRequestException("MSG2: Tên dòng không được để trống");
+        }
+
+        if (input.getUnitPrice() == null || input.getUnitPrice() < 0) {
+            input.setUnitPrice(0.0);
+        }
+
+        if (input.getDiscountAmount() == null || input.getDiscountAmount() < 0) {
+            input.setDiscountAmount(0.0);
+        }
+
+        if (input.getTaxRate() == null || input.getTaxRate() < 0) {
+            input.setTaxRate(DEFAULT_TAX_RATE);
+        }
+
+        if (input.getSourceType() == null) {
+            input.setSourceType(BookingLineSourceType.MANUAL_EXTRA);
+        }
+
+        if (input.getEditable() == null) {
+            input.setEditable(true);
+        }
+
+        if (input.getRemovable() == null) {
+            input.setRemovable(true);
+        }
+
+        return input;
+    }
+
+    private void validateLineList(List<BookingLineRequest> lines, BookingLineItemType expectedType) {
+        for (BookingLineRequest line : lines) {
+            if (line.getItemType() != expectedType) {
+                throw new BadRequestException("MSG2: Danh sách dòng không hợp lệ");
+            }
+
+            if (line.getQuantity() == null || line.getQuantity() <= 0) {
+                throw new BadRequestException("MSG2: Số lượng phải lớn hơn 0");
+            }
+
+            if (line.getUnitPrice() == null || line.getUnitPrice() < 0) {
+                throw new BadRequestException("MSG13: Giá phải lớn hơn hoặc bằng 0");
             }
         }
     }
+
+    private AmountSummary recalculateAmount(List<BookingLineRequest> lines) {
+        double subtotal = 0.0;
+        double tax = 0.0;
+
+        for (BookingLineRequest line : lines) {
+            line = normalizeLine(line);
+
+            double gross = (line.getUnitPrice() * line.getQuantity()) - line.getDiscountAmount();
+            gross = Math.max(gross, 0.0);
+
+            double lineTax = gross * line.getTaxRate();
+
+            subtotal += gross;
+            tax += lineTax;
+        }
+
+        return new AmountSummary(
+                round(subtotal),
+                round(tax),
+                round(subtotal + tax)
+        );
+    }
+
+    private void saveLineSnapshots(Booking booking, List<BookingLineRequest> lines, String currentUserId) {
+        int order = 1;
+
+        for (BookingLineRequest request : lines) {
+            request = normalizeLine(request);
+
+            double gross = Math.max(
+                    (request.getUnitPrice() * request.getQuantity()) - request.getDiscountAmount(),
+                    0.0
+            );
+
+            double lineTax = round(gross * request.getTaxRate());
+
+            BookingLineSnapshot snapshot = BookingLineSnapshot.builder()
+                    .booking(booking)
+                    .itemType(request.getItemType())
+                    .itemId(request.getItemId())
+                    .itemName(request.getItemName())
+                    .quantity(request.getQuantity())
+                    .unitPrice(request.getUnitPrice())
+                    .discountAmount(request.getDiscountAmount())
+                    .taxRate(request.getTaxRate())
+                    .taxAmount(lineTax)
+                    .lineAmount(round(gross + lineTax))
+                    .sourceType(request.getSourceType())
+                    .sourceId(request.getSourceId())
+                    .sourceName(request.getSourceName())
+                    .editable(request.getEditable())
+                    .removable(request.getRemovable())
+                    .displayOrder(request.getDisplayOrder() == null ? order : request.getDisplayOrder())
+                    .createdBy(currentUserId)
+                    .createdAt(Instant.now())
+                    .isDeleted(false)
+                    .build();
+
+            lineRepository.save(snapshot);
+            order++;
+        }
+    }
+
+    private void savePackageSnapshot(
+            Booking booking,
+            WeddingPackage weddingPackage,
+            DishCombo selectedMenuCombo,
+            String currentUserId
+    ) {
+        if (weddingPackage == null) {
+            return;
+        }
+
+        BookingPackageSnapshot snapshot = BookingPackageSnapshot.builder()
+                .booking(booking)
+                .packageId(weddingPackage.getId())
+                .packageName(weddingPackage.getName())
+                .packageDescription(weddingPackage.getDescription())
+                .packagePolicySnapshot(buildPackagePolicySnapshot(weddingPackage))
+                .selectedMenuComboId(selectedMenuCombo == null ? null : selectedMenuCombo.getId())
+                .selectedMenuComboName(selectedMenuCombo == null ? null : selectedMenuCombo.getName())
+                .createdBy(currentUserId)
+                .createdAt(Instant.now())
+                .isDeleted(false)
+                .build();
+
+        packageSnapshotRepository.save(snapshot);
+    }
+
     private String buildPackagePolicySnapshot(WeddingPackage weddingPackage) {
-        return "WeddingPackageSnapshot{name='" + weddingPackage.getName() + "', status='" + weddingPackage.getStatus() + "'}";
+        return "WeddingPackageSnapshot{name='" + weddingPackage.getName()
+                + "', status='" + weddingPackage.getStatus()
+                + "'}";
     }
 
     private BookingLineRequest systemHallLine(Hall hall, double hallPrice) {
-        return toLine(hall.getId(), hall.getName(), BookingLineItemType.HALL, 1, hallPrice, BookingLineSourceType.SYSTEM, hall.getId(), "HALL", false, false);
+        return toLine(
+                hall.getId(),
+                hall.getName(),
+                BookingLineItemType.HALL,
+                1,
+                hallPrice,
+                BookingLineSourceType.SYSTEM,
+                hall.getId(),
+                "HALL",
+                false,
+                false
+        );
     }
 
-    private BookingLineRequest toLine(UUID itemId, String itemName, BookingLineItemType type, Integer quantity, Double unitPrice, BookingLineSourceType sourceType, UUID sourceId, String sourceName, Boolean editable, Boolean removable) {
+    private BookingLineRequest toLine(
+            UUID itemId,
+            String itemName,
+            BookingLineItemType type,
+            Integer quantity,
+            Double unitPrice,
+            BookingLineSourceType sourceType,
+            UUID sourceId,
+            String sourceName,
+            Boolean editable,
+            Boolean removable
+    ) {
         BookingLineRequest line = new BookingLineRequest();
         line.setItemType(type);
         line.setItemId(itemId);
@@ -1075,79 +1332,151 @@ public class BookingServiceImpl implements BookingService {
     }
 
     private void ensureBookingEditableForLineEdit(Booking booking) {
-        if (booking.getStatus() != BookingStatus.PENDING) throw new BadRequestException("MSG67: Trạng thái booking không cho phép chỉnh sửa danh sách món/dịch vụ/đồ uống");
+        if (booking.getStatus() != BookingStatus.PENDING) {
+            throw new BadRequestException("MSG67: Trạng thái booking không cho phép chỉnh sửa danh sách món/dịch vụ/đồ uống");
+        }
     }
 
     private Hall loadActiveHall(UUID hallId) {
-        Hall hall = hallRepository.findByIdAndIsDeletedFalse(hallId).orElseThrow(() -> new ResourceNotFoundException("Sảnh không tồn tại"));
-        if (hall.getStatus() != HallStatus.ACTIVE) throw new BadRequestException("MSG2: Sảnh không hoạt động");
+        Hall hall = hallRepository.findByIdAndIsDeletedFalse(hallId)
+                .orElseThrow(() -> new ResourceNotFoundException("Sảnh không tồn tại"));
+
+        if (hall.getStatus() != HallStatus.ACTIVE) {
+            throw new BadRequestException("MSG2: Sảnh không hoạt động");
+        }
+
         return hall;
     }
 
     private Shift loadActiveShift(UUID shiftId) {
-        Shift shift = shiftRepository.findByIdAndIsDeletedFalse(shiftId).orElseThrow(() -> new ResourceNotFoundException("Ca không tồn tại"));
-        if (shift.getStatus() != ShiftStatus.ACTIVE) throw new BadRequestException("MSG2: Ca không hoạt động");
+        Shift shift = shiftRepository.findByIdAndIsDeletedFalse(shiftId)
+                .orElseThrow(() -> new ResourceNotFoundException("Ca không tồn tại"));
+
+        if (shift.getStatus() != ShiftStatus.ACTIVE) {
+            throw new BadRequestException("MSG2: Ca không hoạt động");
+        }
+
         return shift;
     }
 
     private WeddingPackage loadActiveWeddingPackage(UUID packageId) {
-        WeddingPackage weddingPackage = weddingPackageRepository.findByIdAndIsDeletedFalse(packageId).orElseThrow(() -> new ResourceNotFoundException("Gói tiệc không tồn tại"));
-        if (weddingPackage.getStatus() != WeddingPackageStatus.ACTIVE) throw new BadRequestException("MSG2: Gói tiệc không hoạt động");
+        WeddingPackage weddingPackage = weddingPackageRepository.findByIdAndIsDeletedFalse(packageId)
+                .orElseThrow(() -> new ResourceNotFoundException("Gói tiệc không tồn tại"));
+
+        if (weddingPackage.getStatus() != WeddingPackageStatus.ACTIVE) {
+            throw new BadRequestException("MSG2: Gói tiệc không hoạt động");
+        }
+
         return weddingPackage;
     }
 
     private DishCombo resolveSelectedMenuCombo(WeddingPackage weddingPackage, UUID selectedMenuComboId) {
         List<WeddingPackageMenuCombo> options = packageMenuComboRepository.findByPackageId(weddingPackage.getId());
-        if (options.isEmpty()) return weddingPackage.getDefaultMenuCombo();
-        UUID selected = selectedMenuComboId == null ? weddingPackage.getDefaultMenuCombo().getId() : selectedMenuComboId;
-        boolean allowed = options.stream().anyMatch(o -> o.getDishCombo().getId().equals(selected));
-        if (!allowed) throw new BadRequestException("MSG2: Menu combo không thuộc gói tiệc đã chọn");
-        DishCombo combo = dishComboRepository.findByIdAndIsDeletedFalse(selected).orElseThrow(() -> new ResourceNotFoundException("Menu combo không tồn tại"));
-        if (combo.getStatus() != DishComboStatus.ACTIVE) throw new BadRequestException("MSG2: Menu combo không hoạt động");
+
+        if (options.isEmpty()) {
+            return weddingPackage.getDefaultMenuCombo();
+        }
+
+        UUID selected = selectedMenuComboId == null
+                ? weddingPackage.getDefaultMenuCombo().getId()
+                : selectedMenuComboId;
+
+        boolean allowed = options.stream()
+                .anyMatch(o -> o.getDishCombo().getId().equals(selected));
+
+        if (!allowed) {
+            throw new BadRequestException("MSG2: Menu combo không thuộc gói tiệc đã chọn");
+        }
+
+        DishCombo combo = dishComboRepository.findByIdAndIsDeletedFalse(selected)
+                .orElseThrow(() -> new ResourceNotFoundException("Menu combo không tồn tại"));
+
+        if (combo.getStatus() != DishComboStatus.ACTIVE) {
+            throw new BadRequestException("MSG2: Menu combo không hoạt động");
+        }
+
         return combo;
     }
 
-    private boolean detectPackageChange(Booking booking, BookingMode newMode, WeddingPackage newPackage, DishCombo newCombo) {
+    private boolean detectPackageChange(
+            Booking booking,
+            BookingMode newMode,
+            WeddingPackage newPackage,
+            DishCombo newCombo
+    ) {
         UUID oldPackageId = booking.getWeddingPackage() == null ? null : booking.getWeddingPackage().getId();
         UUID newPackageId = newPackage == null ? null : newPackage.getId();
+
         UUID oldComboId = booking.getSelectedMenuCombo() == null ? null : booking.getSelectedMenuCombo().getId();
         UUID newComboId = newCombo == null ? null : newCombo.getId();
-        return booking.getBookingMode() != newMode || !Objects.equals(oldPackageId, newPackageId) || !Objects.equals(oldComboId, newComboId);
+
+        return booking.getBookingMode() != newMode
+                || !Objects.equals(oldPackageId, newPackageId)
+                || !Objects.equals(oldComboId, newComboId);
     }
 
     private Booking loadExistingBooking(UUID bookingId) {
-        Booking booking = bookingRepository.findById(bookingId).orElseThrow(() -> new ResourceNotFoundException("Booking không tồn tại"));
-        if (Boolean.TRUE.equals(booking.getIsDeleted()) || booking.getStatus() == BookingStatus.DELETED) throw new ResourceNotFoundException("Booking đã bị xóa");
+        Booking booking = bookingRepository.findById(bookingId)
+                .orElseThrow(() -> new ResourceNotFoundException("Booking không tồn tại"));
+
+        if (Boolean.TRUE.equals(booking.getIsDeleted()) || booking.getStatus() == BookingStatus.DELETED) {
+            throw new ResourceNotFoundException("Booking đã bị xóa");
+        }
+
         return booking;
     }
 
     private double calculateHallPrice(Hall hall, Shift shift, LocalDate bookingDate) {
         TimeSlot timeSlot = resolveTimeSlot(shift);
         DayType dayType = isWeekend(bookingDate) ? DayType.WEEKEND : DayType.WEEKDAY;
-        return hallPricingRepository.findByHallIdAndTimeSlotAndDayType(hall.getId(), timeSlot, dayType)
+
+        return hallPricingRepository.findByHallIdAndTimeSlotAndDayType(
+                        hall.getId(),
+                        timeSlot,
+                        dayType
+                )
                 .map(HallPricing::getPrice)
                 .orElse(hall.getHallType().getBasePrice());
     }
 
     private TimeSlot resolveTimeSlot(Shift shift) {
         String name = shift.getName() == null ? "" : shift.getName().toLowerCase();
-        if (name.contains("morning") || name.contains("sáng")) return TimeSlot.MORNING;
-        if (name.contains("afternoon") || name.contains("chiều")) return TimeSlot.AFTERNOON;
-        if (name.contains("evening") || name.contains("tối")) return TimeSlot.EVENING;
+
+        if (name.contains("morning") || name.contains("sáng")) {
+            return TimeSlot.MORNING;
+        }
+
+        if (name.contains("afternoon") || name.contains("chiều")) {
+            return TimeSlot.AFTERNOON;
+        }
+
+        if (name.contains("evening") || name.contains("tối")) {
+            return TimeSlot.EVENING;
+        }
+
         int hour = shift.getStartTime() == null ? 18 : shift.getStartTime().getHour();
-        if (hour < 12) return TimeSlot.MORNING;
-        if (hour < 17) return TimeSlot.AFTERNOON;
+
+        if (hour < 12) {
+            return TimeSlot.MORNING;
+        }
+
+        if (hour < 17) {
+            return TimeSlot.AFTERNOON;
+        }
+
         return TimeSlot.EVENING;
     }
 
     private boolean isWeekend(LocalDate date) {
-        return date.getDayOfWeek() == DayOfWeek.SATURDAY || date.getDayOfWeek() == DayOfWeek.SUNDAY;
+        return date.getDayOfWeek() == DayOfWeek.SATURDAY
+                || date.getDayOfWeek() == DayOfWeek.SUNDAY;
     }
 
     private BookingResponse mapToBookingResponse(Booking booking) {
         List<BookingLineResponse> lines = lineRepository.findByBookingId(booking.getId()).stream()
                 .map(this::mapLine)
                 .collect(Collectors.toList());
+
         return BookingResponse.builder()
                 .id(booking.getId())
                 .bookingDate(toLocalDate(booking.getBookingDate()))
@@ -1180,6 +1509,8 @@ public class BookingServiceImpl implements BookingService {
                 .status(booking.getStatus())
                 .cancelReason(booking.getCancelReason())
                 .bookingLines(lines)
+                .manualMenuMode(booking.getManualMenuMode())
+                .menuComboSnapshots(mapManualComboSnapshots(booking.getId()))
                 .lastModifiedAt(booking.getUpdatedAt())
                 .lastModifiedBy(booking.getUpdatedBy())
                 .build();
@@ -1206,9 +1537,53 @@ public class BookingServiceImpl implements BookingService {
                 .build();
     }
 
+    private List<BookingMenuComboSnapshotResponse> mapManualComboSnapshots(UUID bookingId) {
+        return menuComboSnapshotRepository.findByBookingId(bookingId).stream()
+                .map(combo -> BookingMenuComboSnapshotResponse.builder()
+                        .id(combo.getId())
+                        .comboId(combo.getComboId())
+                        .comboName(combo.getComboName())
+                        .tableCount(combo.getTableCount())
+                        .originalComboPrice(combo.getOriginalComboPrice())
+                        .discountRate(combo.getDiscountRate())
+                        .discountedComboPrice(combo.getDiscountedComboPrice())
+                        .displayOrder(combo.getDisplayOrder())
+                        .slotSnapshots(mapManualComboSlotSnapshots(combo.getSlotSnapshots()))
+                        .build())
+                .collect(Collectors.toList());
+    }
+
+    private List<BookingMenuComboSlotSnapshotResponse> mapManualComboSlotSnapshots(
+            List<BookingMenuComboSlotSnapshot> slots
+    ) {
+        if (slots == null) {
+            return List.of();
+        }
+
+        return slots.stream()
+                .sorted(Comparator.comparing(BookingMenuComboSlotSnapshot::getDisplayOrder))
+                .map(slot -> BookingMenuComboSlotSnapshotResponse.builder()
+                        .id(slot.getId())
+                        .slotId(slot.getSlotId())
+                        .slotName(slot.getSlotName())
+                        .originalDishId(slot.getOriginalDishId())
+                        .originalDishName(slot.getOriginalDishName())
+                        .originalDishPrice(slot.getOriginalDishPrice())
+                        .selectedDishId(slot.getSelectedDishId())
+                        .selectedDishName(slot.getSelectedDishName())
+                        .selectedDishPrice(slot.getSelectedDishPrice())
+                        .replaced(slot.getReplaced())
+                        .displayOrder(slot.getDisplayOrder())
+                        .build())
+                .collect(Collectors.toList());
+    }
+
     private void reassignDisplayOrder(List<BookingLineRequest> lines) {
         int i = 1;
-        for (BookingLineRequest line : lines) line.setDisplayOrder(i++);
+
+        for (BookingLineRequest line : lines) {
+            line.setDisplayOrder(i++);
+        }
     }
 
     private Instant toStartOfDay(LocalDate date) {
@@ -1245,9 +1620,23 @@ public class BookingServiceImpl implements BookingService {
         return itemTypeLabel + ": " + itemName + valueText;
     }
 
+    private String resolveSlotName(DishComboSlot slot, int slotOrder) {
+        try {
+            Object value = slot.getClass().getMethod("getSlotName").invoke(slot);
+
+            if (value instanceof String name && !name.isBlank()) {
+                return name;
+            }
+        } catch (Exception ignored) {
+        }
+
+        return "Món " + slotOrder;
+    }
+
     private void saveAuditLog(String userId, String action, UUID targetId, String targetName) {
         try {
             UUID userUUID = UUID.fromString(userId);
+
             AuditLog auditLog = AuditLog.builder()
                     .userId(userUUID)
                     .action(action)
@@ -1255,11 +1644,17 @@ public class BookingServiceImpl implements BookingService {
                     .targetName(targetName)
                     .createdAt(Instant.now())
                     .build();
+
             auditLogRepository.save(auditLog);
         } catch (IllegalArgumentException e) {
-            // Keep same style as existing Hall/HallType code: skip audit if principal name is not UUID.
+            // Skip audit if principal name is not UUID.
         }
     }
 
-    private record AmountSummary(double subtotalAmount, double taxAmount, double bookingAmount) {}
+    private record AmountSummary(
+            double subtotalAmount,
+            double taxAmount,
+            double bookingAmount
+    ) {
+    }
 }
